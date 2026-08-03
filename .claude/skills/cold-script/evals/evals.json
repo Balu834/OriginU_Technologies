@@ -1,0 +1,17 @@
+{
+  "skill_name": "cold-script",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Write me a cold call script for HVAC companies in the US. The offer is the free website.",
+      "expected_output": "All 3 opener variants (Referral, Open or Not, Business Project), each a full 5-part script. Hosting fee never mentioned. Pre-built demo close. DM follow-up at the bottom. No AI words, no em or en dashes.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "I need a cold call script for plumbers in the US, voice AI receptionist offer.",
+      "expected_output": "Single script (not 3 variants) with the Lost money / Lost time branching structure. Price silent. Never says AI, bot, or automated. DM follow-up at the bottom.",
+      "files": []
+    }
+  ]
+}
