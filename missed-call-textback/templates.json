@@ -1,0 +1,29 @@
+{
+  "_note": "WhatsApp business-initiated messages need templates pre-approved by Meta. A missed call does NOT open a 24-hour session — the customer rang a phone, they did not message you — so the first message out must be an approved template. Submit these in Meta Business Manager under category UTILITY. Marketing-flavoured wording gets rejected or throttled, so there is deliberately no selling here.",
+
+  "missed_call_immediate": {
+    "category": "UTILITY",
+    "language": "en",
+    "body": "Sorry we missed your call — this is {{1}}. Reply here with what you need and your area, and {{2}} will call you straight back.",
+    "example": { "1": "Planet Electrical", "2": "Mohamed" },
+    "_why": "Sent within seconds of the missed call, while they still remember dialling. No pitch, no links, no apology paragraph. The single job is to keep them from ringing the next electrician in the search results."
+  },
+
+  "missed_call_after_hours": {
+    "category": "UTILITY",
+    "language": "en",
+    "body": "Sorry we missed your call — this is {{1}}. We're closed right now but reply with what you need and your area, and {{2}} will call you first thing.",
+    "example": { "1": "Planet Electrical", "2": "Mohamed" },
+    "_why": "Same message, honest about timing. Promising an immediate callback at 11pm and not delivering is worse than saying 'first thing'."
+  },
+
+  "_freeform_replies": {
+    "_note": "Once they reply, a 24-hour service window opens and you can send plain text — no template needed. These are what the service sends back.",
+
+    "acknowledge": "Got it, thanks — passing this to {{1}} now. He'll call you shortly.",
+
+    "emergency_acknowledge": "Thanks — that sounds urgent, {{1}} is being alerted now. If you can smell burning or see sparking, switch off at the mains if it's safe to reach, and don't touch anything else.",
+
+    "_why": "The emergency variant fires on the same signals as the voice agent: burning, smoke, sparking, exposed wire, water near electrics. Safety guidance only, never a fix instruction."
+  }
+}
