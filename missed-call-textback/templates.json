@@ -1,5 +1,5 @@
 {
-  "_note": "WhatsApp business-initiated messages need templates pre-approved by Meta. A missed call does NOT open a 24-hour session — the customer rang a phone, they did not message you — so the first message out must be an approved template. Submit these in Meta Business Manager under category UTILITY. Marketing-flavoured wording gets rejected or throttled, so there is deliberately no selling here.",
+  "_note": "WhatsApp business-initiated messages need templates pre-approved by Meta. A missed call does NOT open a 24-hour session — the customer rang a phone, they did not message you — so the first message out must be an approved template. Submit these in Meta Business Manager under category UTILITY. Marketing-flavoured wording gets rejected or throttled, so there is deliberately no selling here. The active template name is chosen via WHATSAPP_MISSED_CALL_TEMPLATE in .env — this file is documentation/reference for what to submit, not read by the server at runtime.",
 
   "missed_call_immediate": {
     "category": "UTILITY",
@@ -17,13 +17,16 @@
     "_why": "Same message, honest about timing. Promising an immediate callback at 11pm and not delivering is worse than saying 'first thing'."
   },
 
-  "_freeform_replies": {
-    "_note": "Once they reply, a 24-hour service window opens and you can send plain text — no template needed. These are what the service sends back.",
+  "_conversation": {
+    "_note": "Free-form replies sent once the customer has messaged us and a 24-hour service window is open. {{1}}/{{2}} are filled in by lib/conversation.mjs, not by Meta.",
 
-    "acknowledge": "Got it, thanks — passing this to {{1}} now. He'll call you shortly.",
+    "ask_problem": "No worries — what's the issue you're facing, and what area are you in?",
+    "ask_area": "Sure. What area are you located in?",
+    "ask_name": "Thanks. May I have your name?",
+    "ask_urgency": "Thanks {{1}}, do you need someone today, or is another day okay?",
 
-    "emergency_acknowledge": "Thanks — that sounds urgent, {{1}} is being alerted now. If you can smell burning or see sparking, switch off at the mains if it's safe to reach, and don't touch anything else.",
+    "lead_confirmation": "Thanks {{1}}! Got it — {{2}} will be in touch shortly.",
 
-    "_why": "The emergency variant fires on the same signals as the voice agent: burning, smoke, sparking, exposed wire, water near electrics. Safety guidance only, never a fix instruction."
+    "emergency_safety": "Thanks — that sounds urgent, {{1}} is being alerted now. If you can smell burning or see sparking, switch off at the mains if it's safe to reach, and don't touch anything else."
   }
 }

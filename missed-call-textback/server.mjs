@@ -1,160 +1,140 @@
 /**
  * Missed-call textback for a one-person trade business.
  *
- *   POST /missed-call   { "from": "+9198...", "afterHours": false }
- *       -> WhatsApps the caller an approved template within seconds
+ *   POST /missed-call   auth'd endpoint for the phone automation (MacroDroid/
+ *                       Tasker) to call the instant a call goes unanswered
+ *   GET  /webhook       Meta's verification handshake
+ *   POST /webhook       inbound WhatsApp events — replies drive a short
+ *                       conversation that fills in the lead, then notifies
+ *                       the owner on WhatsApp
+ *   GET  /health        liveness check
  *
- *   GET/POST /webhook   Meta's verification handshake + inbound messages
- *       -> when the caller replies, forwards it to the owner's WhatsApp
- *
- * The trigger for /missed-call is deliberately left open — see README. Any
- * source that can make an HTTP request works: an Android automation on the
- * owner's phone, a call-forwarding provider's webhook, Zapier, or curl.
+ * Zero dependencies by design — see ../voice-agent for the premium/future
+ * product; this is the ship-it-today MVP. Route handlers in routes/ are
+ * plain functions over an injected `deps` object so they're testable
+ * without a live HTTP server or real Meta credentials (see test/).
  */
 import http from "node:http";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadConfig, findMissingConfig } from "./config.mjs";
+import { createStore } from "./lib/store.mjs";
+import { createWhatsAppClient } from "./lib/whatsapp.mjs";
+import { log, logError } from "./lib/logger.mjs";
+import { handleHealth } from "./routes/health.mjs";
+import { handleMissedCall } from "./routes/missedCall.mjs";
+import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
+
+import templates from "./templates.json" with { type: "json" };
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-const env = {
-  ...Object.fromEntries(
-    (fs.existsSync(path.join(here, ".env"))
-      ? fs.readFileSync(path.join(here, ".env"), "utf8").split(/\r?\n/)
-      : []
-    )
-      .filter((l) => l.trim() && !l.trim().startsWith("#") && l.includes("="))
-      .map((l) => {
-        const i = l.indexOf("=");
-        return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
-      })
-  ),
-  ...process.env,
-};
+export function buildApp(config) {
+  const store = createStore(path.join(config.DATA_DIR, "db.json"));
+  const wa = createWhatsAppClient(config);
+  const deps = { config, store, wa, templates };
 
-const required = ["WA_PHONE_NUMBER_ID", "WA_ACCESS_TOKEN", "WA_VERIFY_TOKEN", "OWNER_WHATSAPP", "BUSINESS_NAME", "OWNER_NAME"];
-const missing = required.filter((k) => !env[k]);
-if (missing.length) {
-  console.error(`Missing in .env: ${missing.join(", ")}`);
-  console.error("Copy .env.example to .env and fill it in.");
-  process.exit(1);
+  /** Dispatches one request. Returns { status, body? , rawText?, afterAck? }. */
+  async function handle(ctx) {
+    if (ctx.method === "GET" && ctx.pathname === "/health") {
+      return handleHealth();
+    }
+    if (ctx.method === "GET" && ctx.pathname === "/webhook") {
+      return verifyWebhookGet(ctx, deps);
+    }
+    if (ctx.method === "POST" && ctx.pathname === "/webhook") {
+      return handleWebhookPost(ctx, deps);
+    }
+    if (ctx.method === "POST" && ctx.pathname === "/missed-call") {
+      return handleMissedCall(ctx, deps);
+    }
+    return { status: 404, body: { error: "not found" } };
+  }
+
+  return { handle, store, wa, deps };
 }
 
-const templates = JSON.parse(fs.readFileSync(path.join(here, "templates.json"), "utf8"));
-
-// Same signals the voice agent treats as an emergency. Kept in one place so
-// the two products can't drift apart on what counts as urgent.
-const EMERGENCY = /burn|smoke|smoking|spark|shock|fire|live wire|naked wire|water|leak|flood|no power|power gone|short circuit|shortcircuit/i;
-
-const wa = async (payload) => {
-  const res = await fetch(`https://graph.facebook.com/v21.0/${env.WA_PHONE_NUMBER_ID}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.WA_ACCESS_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) console.error("whatsapp send failed:", res.status, JSON.stringify(body));
-  return { ok: res.ok, body };
-};
+}
 
-const sendTemplate = (to, name) =>
-  wa({
-    to,
-    type: "template",
-    template: {
-      name,
-      language: { code: "en" },
-      components: [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: env.BUSINESS_NAME },
-            { type: "text", text: env.OWNER_NAME },
-          ],
-        },
-      ],
-    },
-  });
-
-const sendText = (to, body) => wa({ to, type: "text", text: { body, preview_url: false } });
-
-const readBody = (req) =>
-  new Promise((resolve) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      try { resolve(JSON.parse(raw || "{}")); } catch { resolve({}); }
-    });
-  });
-
-const json = (res, code, obj) => {
-  res.writeHead(code, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(obj));
-};
-
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-
-  // Meta's one-time webhook verification handshake.
-  if (req.method === "GET" && url.pathname === "/webhook") {
-    const challenge = url.searchParams.get("hub.challenge");
-    if (url.searchParams.get("hub.verify_token") === env.WA_VERIFY_TOKEN) {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      return res.end(challenge ?? "");
-    }
-    return json(res, 403, { error: "bad verify token" });
-  }
-
-  if (req.method === "POST" && url.pathname === "/missed-call") {
-    const { from, afterHours } = await readBody(req);
-    if (!from?.startsWith("+")) return json(res, 400, { error: "from must be an E.164 number" });
-
-    const template = afterHours ? "missed_call_after_hours" : "missed_call_immediate";
-    const sent = await sendTemplate(from, template);
-    console.log(`[missed-call] ${from} -> ${template} ${sent.ok ? "sent" : "FAILED"}`);
-    return json(res, sent.ok ? 200 : 502, { sent: sent.ok, template });
-  }
-
-  // Inbound: the caller replied. A reply opens a 24h service window, so from
-  // here on plain text is allowed and no template is needed.
-  if (req.method === "POST" && url.pathname === "/webhook") {
-    const body = await readBody(req);
-    res.writeHead(200); res.end(); // ack fast; Meta retries on slow responses
-
-    for (const entry of body.entry ?? []) {
-      for (const change of entry.changes ?? []) {
-        for (const msg of change.value?.messages ?? []) {
-          if (msg.type !== "text") continue;
-          const from = `+${msg.from}`;
-          const text = msg.text.body;
-          const urgent = EMERGENCY.test(text);
-
-          console.log(`[reply] ${from}${urgent ? " URGENT" : ""}: ${text}`);
-
-          const ack = urgent
-            ? templates._freeform_replies.emergency_acknowledge
-            : templates._freeform_replies.acknowledge;
-          await sendText(from, ack.replace("{{1}}", env.OWNER_NAME));
-
-          // The whole point: the owner gets the lead where he'll actually see
-          // it, without having to open an app or a dashboard.
-          await sendText(
-            env.OWNER_WHATSAPP,
-            `${urgent ? "URGENT — " : ""}Missed call reply\n${from}\n\n"${text}"`
-          );
+function startServer(config, app) {
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const rawBody = req.method === "POST" ? await readRawBody(req) : Buffer.alloc(0);
+      let json = {};
+      if (req.method === "POST") {
+        try {
+          json = JSON.parse(rawBody.toString("utf8") || "{}");
+        } catch {
+          json = null; // malformed JSON — routes decide how to respond
         }
       }
+
+      const ctx = {
+        method: req.method,
+        pathname: url.pathname,
+        query: url.searchParams,
+        headers: req.headers,
+        rawBody,
+        json,
+      };
+
+      if (req.method === "POST" && json === null && ctx.pathname !== "/webhook") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "malformed JSON body" }));
+      }
+
+      const result = await app.handle(ctx);
+
+      if (result.rawText !== undefined) {
+        res.writeHead(result.status, { "Content-Type": "text/plain" });
+        res.end(result.rawText);
+      } else {
+        res.writeHead(result.status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result.body ?? {}));
+      }
+
+      if (result.afterAck) {
+        result.afterAck().catch((err) => logError("afterAck_error", err, {}));
+      }
+    } catch (err) {
+      logError("unhandled_request_error", err, {});
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "internal error" }));
+      }
     }
-    return;
+  });
+
+  server.listen(config.PORT, () => {
+    log("server_started", { port: config.PORT });
+    console.log(`missed-call-textback listening on :${config.PORT}`);
+    console.log(`  POST /missed-call  (Authorization: Bearer <MISSED_CALL_API_KEY>)`);
+    console.log(`  GET/POST /webhook  (point Meta here)`);
+    console.log(`  GET /health`);
+  });
+
+  return server;
+}
+
+const isMain = path.resolve(process.argv[1] ?? "") === path.resolve(fileURLToPath(import.meta.url));
+
+if (isMain) {
+  const config = loadConfig(process.env, here);
+  const missing = findMissingConfig(config);
+  if (missing.length) {
+    console.error(`Missing in .env: ${missing.join(", ")}`);
+    console.error("Copy .env.example to .env and fill it in.");
+    process.exit(1);
   }
-
-  json(res, 404, { error: "not found" });
-});
-
-const port = Number(env.PORT ?? 3000);
-server.listen(port, () => {
-  console.log(`missed-call-textback listening on :${port}`);
-  console.log(`  POST /missed-call  { "from": "+91...", "afterHours": false }`);
-  console.log(`  GET/POST /webhook  (point Meta here)`);
-});
+  const app = buildApp(config);
+  startServer(config, app);
+}

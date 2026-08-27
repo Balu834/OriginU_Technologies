@@ -2,101 +2,281 @@
 
 Someone rings a contractor who's up a ladder. He can't answer. Within seconds
 they get a WhatsApp asking what they need — so they reply instead of dialling
-the next electrician in the search results.
+the next electrician in the search results. The reply is turned into a
+structured lead through a short, natural conversation, and Mohamed gets a
+two-line notification on his own WhatsApp.
 
 Built as the cheaper, faster-to-ship sibling of `../voice-agent`, and for
 India arguably the better product: everyone is already on WhatsApp, and it
 sidesteps the +91 phone-number wall that blocks inbound voice.
 
-## Why this exists
+## What it does
 
-The voice agent needs an Indian inbound DID, which needs TRAI/DoT regulatory
-approval — days to weeks. This needs none. It can be demoed the same day.
+```
+missed call ──► WhatsApp template ──► conversation ──► lead ──► notify Mohamed
+```
+
+1. Mohamed misses a call.
+2. Phone automation on his Android POSTs the caller's number to `/missed-call`.
+3. The service sends an approved WhatsApp utility template — the *only* thing
+   allowed as a first message, since a missed call doesn't open a messaging
+   window.
+4. The customer replies. A short, natural back-and-forth fills in name, area,
+   problem, and urgency — never more than one question at a time, never a
+   question for something already given.
+5. Once the lead is complete (or an emergency signal fires), Mohamed gets a
+   concise WhatsApp notification.
+
+```
+                 ┌────────────────────┐
+                 │ Mohamed's Android  │
+                 └─────────┬──────────┘
+                      Missed Call
+                           ▼
+                 ┌────────────────────┐
+                 │ MacroDroid/Tasker  │
+                 └─────────┬──────────┘
+                       HTTPS + API key
+                           ▼
+                 ┌────────────────────┐
+                 │ POST /missed-call  │
+                 └─────────┬──────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ WhatsApp Cloud API │──► Customer WhatsApp
+                 └────────────────────┘         │
+                                               Reply
+                                                 ▼
+                 ┌────────────────────┐
+                 │ POST /webhook      │  (signature-verified)
+                 └─────────┬──────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ Conversation state │
+                 │ + field extraction │
+                 └─────────┬──────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ Lead storage       │  data/db.json
+                 └─────────┬──────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ Mohamed's WhatsApp │
+                 └────────────────────┘
+```
 
 ## What's here
 
-| File | What it is |
+| Path | What it is |
 |---|---|
-| `templates.json` | The messages. This is the product; the plumbing is commodity. |
-| `server.mjs` | Fires the template on a missed call, forwards replies to the owner. |
+| `server.mjs` | HTTP entrypoint — routing, request parsing, startup config check. |
+| `config.mjs` | Loads `.env`, applies defaults, reports missing required keys. |
+| `routes/` | One file per endpoint (`health`, `missedCall`, `webhook`), each a plain testable function. |
+| `lib/whatsapp.mjs` | WhatsApp Cloud API client + `X-Hub-Signature-256` verification. |
+| `lib/conversation.mjs` | The state machine: one inbound message in, question/confirmation/notification out. |
+| `lib/extract.mjs` | Rule-based extraction of name/area/problem/urgency from free text. |
+| `lib/emergency.mjs` | Emergency keyword detection, shared in spirit with `../voice-agent`. |
+| `lib/leads.mjs` | Lead data model, summary generation, owner-notification formatting. |
+| `lib/store.mjs` | JSON-file persistence behind a small async interface — swap the implementation, not the callers, to move to Postgres/Supabase/Firebase later. |
+| `templates.json` | The actual WhatsApp copy — templates to submit to Meta, plus in-conversation prompts. |
+| `test/` | `node --test` suite covering webhook auth, missed-call auth, extraction, emergency handling, idempotency. |
+| `scripts/demo.mjs` | Simulated end-to-end walkthrough, no Meta credentials needed. |
 
-## How it works
+Zero npm dependencies — same philosophy as the original: `node:http`,
+`node:crypto`, `node:test`, and `fetch`, nothing else.
+
+## Environment variables
+
+See `.env.example` for the full annotated list. Required for the server to
+start:
 
 ```
-missed call ──► POST /missed-call ──► WhatsApp template to the caller
-                                            │
-                       caller replies ◄──────┘
-                                            │
-                                            ▼
-                              POST /webhook (Meta)
-                                            │
-                          ┌─────────────────┴─────────────────┐
-                          ▼                                   ▼
-             acknowledge the caller            forward the lead to the
-             (urgent variant if it             owner's own WhatsApp
-             mentions burning/sparking)
+META_ACCESS_TOKEN, META_PHONE_NUMBER_ID, META_VERIFY_TOKEN, META_APP_SECRET,
+MOHAMED_WHATSAPP_NUMBER, MISSED_CALL_API_KEY, BUSINESS_NAME, OWNER_NAME
 ```
 
-## The trigger — the one part left open
-
-Something has to tell this that a call was missed. Options, honestly ranked:
-
-1. **An automation app on the owner's phone** (MacroDroid, Tasker, Automate).
-   Detects a missed call, POSTs the number here. No DID, no forwarding, no
-   carrier involvement, works on his existing number. Fiddly to set up once,
-   free forever. **Best fit for a single contractor.**
-2. **Conditional call forwarding to a VoIP number** whose provider webhooks
-   on ring. Cleaner, but reintroduces the DID problem and Indian carriers
-   often block or charge for forwarding to international numbers.
-3. **Anything else that can make an HTTP request** — Zapier, a CRM, curl.
-
-Nothing here assumes a particular choice; `/missed-call` takes a number and
-sends. Swap the trigger without touching the service.
-
-## Constraints worth knowing before you promise anything
-
-**The API number can't be his existing WhatsApp.** A number registered to
-WhatsApp Business API cannot also be on the normal WhatsApp app. He'll need a
-second number for the business line, or to migrate his current one and lose
-the app on it. This surprises people — raise it early, not at handover.
-
-**Templates need Meta approval.** A missed call doesn't open a messaging
-window — they rang a phone, they didn't message you — so the first message
-must be a pre-approved template. Submit under **UTILITY**; anything that
-reads like marketing gets rejected or throttled. Approval is usually hours,
-sometimes longer. Do this before demo day, not on it.
-
-**Cost.** Meta gives 1,000 free service conversations a month, which is far
-more than one contractor will use. Beyond that it's fractions of a rupee per
-conversation. Effectively free at this scale — charge for setup, not usage.
+Missing any of these and `node server.mjs` exits immediately with a clear
+error — it will not start in a half-configured state and silently fail
+later. `META_WABA_ID` and `WEBHOOK_BASE_URL` are informational/reference
+only; nothing in the running server calls the WABA-level API.
 
 ## Running it
 
 ```bash
 cp .env.example .env     # fill in the Meta credentials
-node server.mjs
+npm start                # same as: node server.mjs
 ```
 
-Expose it for Meta's webhook (`ngrok http 3000` or deploy it), then point the
-webhook at `https://.../webhook` using the same `WA_VERIFY_TOKEN`.
+```bash
+npm test                 # node --test test/
+npm run demo             # simulated walkthrough, no credentials needed
+```
 
-Test without a real missed call:
+## Meta setup (do this before demo day)
+
+1. Create a Meta Business account and a WhatsApp Business app at
+   developers.facebook.com.
+2. Add a WhatsApp phone number to the app. **This number cannot also be used
+   in the regular WhatsApp app** — it becomes a dedicated API number. Budget
+   for a second SIM/number if Mohamed wants to keep using his own WhatsApp.
+3. Copy the Phone Number ID and a permanent access token into `.env`
+   (`META_PHONE_NUMBER_ID`, `META_ACCESS_TOKEN`).
+4. Copy the App Secret from App Settings → Basic into `META_APP_SECRET` —
+   this is what verifies inbound webhook requests are genuinely from Meta.
+5. Pick any string for `META_VERIFY_TOKEN`.
+6. In the app's WhatsApp → Configuration screen, set the webhook URL to
+   `${WEBHOOK_BASE_URL}/webhook` and the verify token to the same value as
+   `META_VERIFY_TOKEN`, then subscribe to the `messages` field.
+7. Submit `missed_call_immediate` (and optionally `missed_call_after_hours`)
+   from `templates.json` for approval under category **UTILITY**. Marketing
+   wording gets rejected or throttled — there's deliberately no selling in
+   these. Approval is usually hours; do this well before a live demo.
+8. Set `WHATSAPP_MISSED_CALL_TEMPLATE` to whichever approved template name
+   you want live.
+
+## Local development
+
+Expose the webhook with a tunnel:
+
+```bash
+ngrok http 3000
+```
+
+Point Meta's webhook config at `https://<ngrok-id>.ngrok.io/webhook`.
+
+Trigger a missed call manually:
 
 ```bash
 curl -X POST localhost:3000/missed-call \
-  -H 'Content-Type: application/json' \
-  -d '{"from":"+919110819125"}'
+  -H "Authorization: Bearer $MISSED_CALL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"callerNumber":"+919876543210","timestamp":"2026-08-26T10:30:00+05:30"}'
 ```
+
+Or run `npm run demo` for a fully simulated flow that needs no tunnel, no
+Meta account, and sends nothing over the network.
+
+## Phone automation (MacroDroid / Tasker)
+
+The trigger is deliberately left as "anything that can POST an HTTP
+request" — no call forwarding, no Indian DID required.
+
+1. Trigger: **Missed Call** (or **Call Ended, not answered**).
+2. Extract the caller's number.
+3. Skip if the number is Mohamed's own (the backend also ignores it as a
+   safety net, but filtering at the source saves a request).
+4. HTTP POST to `${WEBHOOK_BASE_URL}/missed-call`:
+
+```http
+POST /missed-call HTTP/1.1
+Authorization: Bearer YOUR_MISSED_CALL_API_KEY
+Content-Type: application/json
+
+{
+  "callerNumber": "+919876543210",
+  "timestamp": "2026-08-26T10:30:00+05:30"
+}
+```
+
+5. The service sends the WhatsApp template, the customer replies, and the
+   lead is captured automatically from there — the automation's job ends
+   at step 4.
+
+## Duplicate protection
+
+- **Same missed call sent twice / automation retries**: `/missed-call`
+  tracks the last time a template was sent to each caller and skips
+  resending within a 10-minute window (`routes/missedCall.mjs`).
+- **Meta retries the webhook**: every inbound message carries a WhatsApp
+  message ID (`msg.id`); it's recorded the first time it's processed and
+  skipped on any later delivery (`lib/store.mjs`).
+- **The webhook acks before doing any work** — Meta retries aggressively on
+  slow responses, which would otherwise cause double-sends.
+
+## Field extraction — how it works and its limits
+
+`lib/extract.mjs` is a fixed set of regexes, not an LLM call — no extra
+credential was requested for this MVP, and a small deterministic rule set is
+easier to test and keep from inventing information. It handles:
+
+- A single fact per message ("AC not cooling", "Whitefield", "Ravi").
+- Several facts in one message ("I'm Ravi from Whitefield and my AC isn't
+  cooling. Need someone today.").
+- Direct answers to a direct question — if the bot just asked for the area
+  and the reply doesn't match anything more specific, the reply becomes the
+  area.
+
+Known limitation: area matching expects a single word (fine for
+Whitefield, Indiranagar, Marathahalli, Koramangala, etc.); a genuinely
+multi-word area will simply be asked again rather than mis-parsed.
+
+## Emergency handling
+
+Reuses the same signal list as `../voice-agent/assistant.json`: burning
+smell, smoke, sparking, exposed live wire, water near electrics, total
+power outage. On a hit, the system:
+
+- Never diagnoses the fault or suggests a fix.
+- Sends basic safety guidance only (switch off at the mains if safe to
+  reach, don't touch anything else).
+- Marks the lead urgent and notifies Mohamed immediately, even if the lead
+  is otherwise incomplete — safety over lead qualification.
+
+## Storage
+
+A single JSON file (`data/db.json`, gitignored) holds leads, conversation
+state, and the idempotency records. `lib/store.mjs` is the only file that
+touches it — nothing else in the codebase reads or writes the filesystem for
+business data, so migrating to Postgres/Supabase/Firebase later means
+reimplementing that one module.
+
+## Language handling
+
+Bangalore customers mix English, Hindi, and Kannada. This MVP's extraction
+is regex-based and English-only for now — a mixed-language reply that
+doesn't match the English patterns will simply prompt a follow-up question
+rather than mis-extract. Full multilingual understanding is a natural
+upgrade path (and one place where a real LLM call would earn its keep) but
+was out of scope for this pass; document it as a known gap, don't pretend
+it's handled.
+
+## Constraints worth knowing before you promise anything
+
+**The API number can't be his existing WhatsApp.** A number registered to
+WhatsApp Business API cannot also be on the normal WhatsApp app.
+
+**Templates need Meta approval**, submitted under UTILITY, before the first
+message can go out.
+
+**24-hour messaging windows apply.** Once a customer replies, free-form
+text is allowed for 24 hours. The owner-notification message sent to
+Mohamed is free-form text — if Mohamed hasn't messaged the business number
+within the last 24 hours, Meta may reject it. Simplest fix for a solo
+operator: have Mohamed send the business number one message
+("hi") to open a standing window, or configure an approved template for
+notifications if that's not acceptable.
+
+**Business verification/KYC may apply** and approval timelines are not
+guaranteed by this project. This system does not eliminate WhatsApp/Meta's
+own requirements, only the need for an Indian inbound voice DID.
+
+**Cost.** Meta gives 1,000 free service conversations a month — far more
+than one contractor will use. Charge for setup, not usage.
 
 ## Design notes
 
-- **No selling in the first message.** It's a utility template by category and
-  by intent — one question, no links, no pitch. Selling there gets it
-  rejected by Meta and ignored by the customer.
-- **Emergency detection is shared** with the voice agent — same signals
-  (burning, sparking, water, no power), same rule: safety guidance only,
-  never a fix instruction, never a diagnosis.
-- **The lead lands in the owner's WhatsApp**, not a dashboard. He is on a
-  roof. He will not open a dashboard.
-- **The webhook acks before doing work.** Meta retries aggressively on slow
-  responses and would otherwise double-send.
+- **No selling in the first message.** Utility template, one question, no
+  links, no pitch.
+- **One question at a time**, and never one that's already been answered.
+- **The lead lands in the owner's WhatsApp**, not a dashboard. He's on a
+  roof; he will not open a dashboard.
+- **The webhook acks before doing work**, and every message is processed in
+  its own try/catch so one malformed event can't take the service down.
+- **No secrets in logs.** `lib/logger.mjs` redacts any key that looks like a
+  token/secret/signature as a safety net, on top of never passing them in.
+
+## Voice agent
+
+`../voice-agent` is untouched and remains the Phase 2 premium product —
+richer, but blocked on an Indian inbound DID. This WhatsApp flow is the
+thing that can be demoed and sold today.

@@ -1,0 +1,15 @@
+{
+  "name": "missed-call-textback",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp missed-call textback MVP for Planet Electrical",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/",
+    "demo": "node scripts/demo.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
