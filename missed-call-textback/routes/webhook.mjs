@@ -46,11 +46,15 @@ export function handleWebhookPost(ctx, deps) {
       for (const change of entry.changes ?? []) {
         for (const msg of change.value?.messages ?? []) {
           try {
-            if (store.hasProcessedMessage(msg.id)) {
-              log("duplicate_message_ignored", { messageId: msg.id });
-              continue;
+            if (!msg.id) {
+              log("message_missing_id", { type: msg.type });
+            } else {
+              if (store.hasProcessedMessage(msg.id)) {
+                log("duplicate_message_ignored", { messageId: msg.id });
+                continue;
+              }
+              store.markMessageProcessed(msg.id);
             }
-            store.markMessageProcessed(msg.id);
 
             if (msg.type !== "text") {
               log("unsupported_message_type_ignored", { type: msg.type });

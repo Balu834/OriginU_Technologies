@@ -34,8 +34,17 @@ function freshConversation(callerNumber) {
  * store; returns a summary of what happened for logging/tests.
  */
 export async function handleInboundMessage({ from, text }, { store, wa, config, templates }) {
-  const conversation = store.getConversation(from) ?? freshConversation(from);
+  const existing = store.getConversation(from);
+  // A reply after the lead is already complete is a new job, not more
+  // detail for the old one — start clean rather than re-completing (and
+  // re-notifying the owner about) the same lead on every later message.
+  const conversation = !existing || existing.completed ? freshConversation(from) : existing;
   const result = { emergency: false, leadCompleted: false };
+
+  // Extract before the emergency check so a message like "the socket is
+  // sparking" still contributes "socket" to the lead, not just the alert.
+  const found = applyAwaitingFallback(text, conversation.awaiting, extractFields(text));
+  conversation.fields = { ...found, ...conversation.fields }; // never overwrite an already-known field
 
   if (isEmergency(text) && !conversation.emergency) {
     conversation.emergency = true;
@@ -47,15 +56,14 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
       const partialLead = createLead({ callerNumber: from, fields: conversation.fields, emergency: true });
       await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead));
     }
-
-    conversation.awaiting = null;
-    conversation.updatedAt = new Date().toISOString();
-    store.saveConversation(from, conversation);
-    return result;
+    // Fall through into the normal ask/complete flow below — the customer
+    // still gets asked whatever's missing (or gets the confirmation, if
+    // this message happened to complete the lead), just after the safety
+    // message rather than instead of it. Going silent here would leave
+    // `awaiting` unset, and the customer's next reply — meant to answer
+    // whatever question would have come next — would have nothing to land
+    // in and get misread as an answer to a later question instead.
   }
-
-  const found = applyAwaitingFallback(text, conversation.awaiting, extractFields(text));
-  conversation.fields = { ...found, ...conversation.fields }; // never overwrite an already-known field
 
   const missing = nextMissingField(conversation.fields);
 
@@ -71,9 +79,10 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
       from,
       fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME])
     );
-    if (!conversation.emergencyNotified) {
-      await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead));
-    }
+    // Always send the completed-lead notification, even after an earlier
+    // emergency alert — that alert had none of the name/area/problem
+    // details this one carries, so it's not a duplicate.
+    await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead));
   } else {
     conversation.awaiting = missing;
     const question = templates._conversation[QUESTION_KEY[missing]];

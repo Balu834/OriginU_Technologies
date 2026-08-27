@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { capitalize } from "./text.mjs";
 
 export function createLead({ callerNumber, fields, emergency }) {
   const now = new Date().toISOString();
@@ -17,8 +18,6 @@ export function createLead({ callerNumber, fields, emergency }) {
     updatedAt: now,
   };
 }
-
-const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 /** Two lines, max. Only states what was actually collected — never invents details. */
 export function buildSummary({ problem, area, urgency }) {

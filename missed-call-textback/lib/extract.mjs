@@ -9,14 +9,20 @@
  * Bangalore localities are one word — Whitefield, Indiranagar,
  * Marathahalli). A multi-word area falls back to being asked again.
  */
+import { capitalize } from "./text.mjs";
+
 const NAME_RE = /\b(?:i am|i'?m|this is|my name is|name is|myself)\s+([A-Za-z]{2,20})\b/i;
 const AREA_RE = /\b(?:from|in|near|at)\s+([A-Za-z]{2,20})\b/i;
+// Words that occasionally follow "from"/"in"/"at" as ordinary grammar
+// rather than a place ("coming from the switch") — never valid captures.
+const STOPWORDS = new Set([
+  "the", "a", "an", "my", "our", "this", "that", "is", "are", "was", "were",
+  "and", "it", "there", "here", "his", "her", "their", "us", "them",
+]);
 const URGENCY_TODAY_RE = /\b(today|now|asap|right away|immediately|urgent(?:ly)?|emergency)\b/i;
 const URGENCY_FLEXIBLE_RE = /\b(tomorrow|later|whenever|any day|no rush|not urgent|next week)\b/i;
 const ISSUE_KEYWORDS_RE =
   /\b(ac|a\/c|fan|light|lights|bulb|wiring|wire|wires|switch|switches|socket|sockets|plug|mcb|inverter|geyser|meter|fuse|power|current|breaker|motor|pump|trip|tripping|short circuit|shock|earthing|heater|circuit)\b/i;
-
-const capitalize = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 function extractProblem(text) {
   const clauses = text
@@ -43,10 +49,10 @@ export function extractFields(text) {
   const out = {};
 
   const nameMatch = text.match(NAME_RE);
-  if (nameMatch) out.name = capitalize(nameMatch[1]);
+  if (nameMatch && !STOPWORDS.has(nameMatch[1].toLowerCase())) out.name = capitalize(nameMatch[1]);
 
   const areaMatch = text.match(AREA_RE);
-  if (areaMatch) out.area = capitalize(areaMatch[1]);
+  if (areaMatch && !STOPWORDS.has(areaMatch[1].toLowerCase())) out.area = capitalize(areaMatch[1]);
 
   const problem = extractProblem(text);
   if (problem) out.problem = problem;
@@ -66,8 +72,9 @@ export function extractFields(text) {
 export function applyAwaitingFallback(text, awaitingField, found) {
   if (!awaitingField || found[awaitingField] || typeof text !== "string") return found;
   const firstClause = text.split(/[,.]|\band\b/i)[0].trim();
-  if (firstClause && firstClause.split(/\s+/).length <= 4) {
-    return { ...found, [awaitingField]: awaitingField === "name" ? capitalize(firstClause) : firstClause };
+  if (firstClause && firstClause.split(/\s+/).length <= 4 && !STOPWORDS.has(firstClause.toLowerCase())) {
+    const value = awaitingField === "name" || awaitingField === "area" ? capitalize(firstClause) : firstClause;
+    return { ...found, [awaitingField]: value };
   }
   return found;
 }

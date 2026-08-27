@@ -54,6 +54,22 @@ test("POST webhook with an invalid signature is rejected", () => {
   assert.equal(res.afterAck, undefined);
 });
 
+test("a message with no id is still processed, and doesn't collide with another id-less message", async () => {
+  const deps = createTestDeps();
+  const payloadA = textMessagePayload({ from: "919876543210", body: "AC not cooling" });
+  delete payloadA.entry[0].changes[0].value.messages[0].id;
+  const payloadB = textMessagePayload({ from: "919876500000", body: "Fan not working" });
+  delete payloadB.entry[0].changes[0].value.messages[0].id;
+
+  const rawA = Buffer.from(JSON.stringify(payloadA));
+  await handleWebhookPost({ rawBody: rawA, headers: { "x-hub-signature-256": signBody(rawA) } }, deps).afterAck();
+
+  const rawB = Buffer.from(JSON.stringify(payloadB));
+  await handleWebhookPost({ rawBody: rawB, headers: { "x-hub-signature-256": signBody(rawB) } }, deps).afterAck();
+
+  assert.equal(deps.wa.sent.length, 2, "both id-less messages, from different customers, must be processed");
+});
+
 test("POST webhook with a malformed payload still acks 200 and does not throw", async () => {
   const deps = createTestDeps();
   const rawBody = Buffer.from("{not valid json");

@@ -39,3 +39,28 @@ for (const msg of EMERGENCY_MESSAGES) {
     assert.match(toOwner.body, /URGENT/);
   });
 }
+
+test("problem-bearing words in the emergency message itself are still captured on the alert", async () => {
+  const deps = createTestDeps();
+  const from = "+919876543210";
+  await handleInboundMessage({ from, text: "The socket is sparking" }, deps);
+
+  const toOwner = deps.wa.sent.find((m) => m.to === deps.config.MOHAMED_WHATSAPP_NUMBER);
+  assert.match(toOwner.body, /Problem: .*socket/i);
+});
+
+test("a lead completed after an earlier emergency still notifies the owner with the full details", async () => {
+  const deps = createTestDeps();
+  const from = "+919876543210";
+
+  await handleInboundMessage({ from, text: "There is smoke coming from the switch" }, deps);
+  await handleInboundMessage({ from, text: "Whitefield" }, deps);
+  await handleInboundMessage({ from, text: "Ravi" }, deps);
+  const result = await handleInboundMessage({ from, text: "today" }, deps);
+
+  assert.equal(result.leadCompleted, true);
+  const ownerMessages = deps.wa.sent.filter((m) => m.to === deps.config.MOHAMED_WHATSAPP_NUMBER);
+  assert.equal(ownerMessages.length, 2, "one immediate emergency alert, then one completed-lead notification");
+  assert.match(ownerMessages[1].body, /Name: Ravi/);
+  assert.match(ownerMessages[1].body, /Area: Whitefield/);
+});

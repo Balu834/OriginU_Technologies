@@ -18,6 +18,12 @@ test("extracts urgency", () => {
   assert.equal(extractFields("Need someone today").urgency, "today");
 });
 
+test("does not mistake grammatical 'from the X' for an area", () => {
+  const found = extractFields("There is smoke coming from the switch");
+  assert.equal(found.area, undefined);
+  assert.match(found.problem, /switch/);
+});
+
 test("extracts all four fields from one combined message", () => {
   const found = extractFields("I'm Ravi from Whitefield and my AC isn't cooling. Need someone today.");
   assert.equal(found.name, "Ravi");

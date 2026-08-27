@@ -86,6 +86,24 @@ test("duplicate missed-call within the dedupe window is not resent", async () =>
   assert.equal(deps.wa.sent.length, 1, "template should only be sent once");
 });
 
+test("a failed WhatsApp send does not block an immediate retry", async () => {
+  const deps = createTestDeps();
+  deps.wa.sendTemplate = () => Promise.resolve({ ok: false, status: 500, body: {} });
+  const body = { callerNumber: "+919876543210", timestamp: "2026-08-26T10:30:00Z" };
+
+  const failed = await handleMissedCall(jsonCtx({ method: "POST", pathname: "/missed-call", headers: AUTH, body }), deps);
+  assert.equal(failed.status, 502);
+
+  let retried = false;
+  deps.wa.sendTemplate = () => {
+    retried = true;
+    return Promise.resolve({ ok: true, status: 200, body: {} });
+  };
+  const second = await handleMissedCall(jsonCtx({ method: "POST", pathname: "/missed-call", headers: AUTH, body }), deps);
+  assert.equal(retried, true, "the retry must actually attempt to send, not get silently deduped");
+  assert.equal(second.body.sent, true);
+});
+
 test("Mohamed's own number is ignored", async () => {
   const deps = createTestDeps();
   const res = await handleMissedCall(

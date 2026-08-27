@@ -56,11 +56,13 @@ export async function handleMissedCall(ctx, { config, store, wa }) {
     config.OWNER_NAME,
   ]);
 
-  store.markMissedCall(caller, Date.now());
-
   if (!sent.ok) {
+    // Don't mark as sent — a retry within the dedupe window should still
+    // get through instead of being silently swallowed by a failed attempt.
     return { status: 502, body: { sent: false, error: "failed to send WhatsApp template" } };
   }
+
+  store.markMissedCall(caller, Date.now());
 
   log("whatsapp_template_sent", { callerNumber: caller, template: config.WHATSAPP_MISSED_CALL_TEMPLATE });
   return { status: 200, body: { sent: true, template: config.WHATSAPP_MISSED_CALL_TEMPLATE } };
