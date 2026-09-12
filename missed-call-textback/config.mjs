@@ -53,6 +53,9 @@ export function loadConfig(env = process.env, dir = here) {
     WHATSAPP_TEMPLATE_LANGUAGE: merged.WHATSAPP_TEMPLATE_LANGUAGE ?? "en",
     BUSINESS_NAME: merged.BUSINESS_NAME ?? "",
     OWNER_NAME: merged.OWNER_NAME ?? "",
+    // "salt:hash" from `node scripts/hash-password.mjs <password>`. Optional:
+    // without it the dashboard refuses to serve rather than running open.
+    DASHBOARD_PASSWORD_HASH: merged.DASHBOARD_PASSWORD_HASH ?? "",
     PORT: Number(merged.PORT ?? 3000),
     DATA_DIR: dataDir,
     DEMO_MODE: merged.DEMO_MODE === "1" || merged.DEMO_MODE === "true",

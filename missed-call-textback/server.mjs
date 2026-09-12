@@ -25,6 +25,7 @@ import { log, logError } from "./lib/logger.mjs";
 import { handleHealth } from "./routes/health.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
+import { handleDashboard, handleLogin, handleLogout } from "./routes/dashboard.mjs";
 
 import templates from "./templates.json" with { type: "json" };
 
@@ -48,6 +49,15 @@ export function buildApp(config) {
     }
     if (ctx.method === "POST" && ctx.pathname === "/missed-call") {
       return handleMissedCall(ctx, deps);
+    }
+    if (ctx.method === "GET" && ctx.pathname === "/") {
+      return handleDashboard(ctx, deps);
+    }
+    if (ctx.method === "POST" && ctx.pathname === "/login") {
+      return handleLogin(ctx, deps);
+    }
+    if (ctx.method === "POST" && ctx.pathname === "/logout") {
+      return handleLogout(ctx, deps);
     }
     return { status: 404, body: { error: "not found" } };
   }
@@ -87,18 +97,25 @@ function startServer(config, app) {
         json,
       };
 
-      if (req.method === "POST" && json === null && ctx.pathname !== "/webhook") {
+      // /webhook verifies a signature over the raw bytes, and the dashboard
+      // forms post url-encoded rather than JSON — none of them want this guard.
+      const NON_JSON_POSTS = new Set(["/webhook", "/login", "/logout"]);
+      if (req.method === "POST" && json === null && !NON_JSON_POSTS.has(ctx.pathname)) {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "malformed JSON body" }));
       }
 
       const result = await app.handle(ctx);
 
-      if (result.rawText !== undefined) {
-        res.writeHead(result.status, { "Content-Type": "text/plain" });
+      const headers = { ...(result.headers ?? {}) };
+      if (result.html !== undefined) {
+        res.writeHead(result.status, { ...headers, "Content-Type": "text/html; charset=utf-8" });
+        res.end(result.html);
+      } else if (result.rawText !== undefined) {
+        res.writeHead(result.status, { ...headers, "Content-Type": "text/plain" });
         res.end(result.rawText);
       } else {
-        res.writeHead(result.status, { "Content-Type": "application/json" });
+        res.writeHead(result.status, { ...headers, "Content-Type": "application/json" });
         res.end(JSON.stringify(result.body ?? {}));
       }
 

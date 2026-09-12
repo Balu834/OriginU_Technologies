@@ -26,6 +26,26 @@ export function getDeps() {
   return cached;
 }
 
+/**
+ * Writes a route result ({ status, html?, rawText?, body?, headers? }) out
+ * to a Vercel response, so every api/ wrapper handles HTML pages,
+ * redirects and JSON the same way.
+ */
+export function sendResult(res, result) {
+  for (const [name, value] of Object.entries(result.headers ?? {})) {
+    res.setHeader(name, value);
+  }
+  if (result.html !== undefined) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(result.status).send(result.html);
+  }
+  if (result.rawText !== undefined) {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.status(result.status).send(result.rawText);
+  }
+  return res.status(result.status).json(result.body ?? {});
+}
+
 /** Reads the full request body into a Buffer. Vercel's request is still a readable stream when bodyParser is disabled. */
 export function readRawBody(req) {
   return new Promise((resolve, reject) => {

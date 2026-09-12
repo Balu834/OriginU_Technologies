@@ -10,7 +10,25 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const EMPTY = () => ({ leads: {}, conversations: {}, processedMessages: {}, processedMissedCalls: {} });
+const EMPTY = () => ({
+  leads: {},
+  conversations: {},
+  processedMessages: {},
+  processedMissedCalls: {},
+  sessions: {},
+  rateLimits: {},
+});
+
+/** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
+function readExpiring(bucket, key) {
+  const entry = bucket[key];
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    delete bucket[key];
+    return null;
+  }
+  return entry;
+}
 
 export function createStore(filePath) {
   let data = EMPTY();
@@ -61,6 +79,30 @@ export function createStore(filePath) {
     async markMissedCall(callerNumber, atMs) {
       data.processedMissedCalls[callerNumber] = atMs;
       persist();
+    },
+
+    async saveSession(id, session, ttlSeconds) {
+      data.sessions[id] = { value: session, expiresAt: Date.now() + ttlSeconds * 1000 };
+      persist();
+    },
+    async getSession(id) {
+      return readExpiring(data.sessions, id)?.value ?? null;
+    },
+    async deleteSession(id) {
+      delete data.sessions[id];
+      persist();
+    },
+
+    /** Increments a windowed counter and returns the new count — used to throttle login attempts. */
+    async bumpRateLimit(key, windowSeconds) {
+      const existing = readExpiring(data.rateLimits, key);
+      const count = (existing?.value ?? 0) + 1;
+      data.rateLimits[key] = {
+        value: count,
+        expiresAt: existing?.expiresAt ?? Date.now() + windowSeconds * 1000,
+      };
+      persist();
+      return count;
     },
   };
 }

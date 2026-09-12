@@ -74,5 +74,25 @@ export function createRedisStore(env = process.env) {
     async markMissedCall(callerNumber, atMs) {
       await command("SET", `missedcall:${callerNumber}`, String(atMs), "EX", String(MISSED_CALL_TTL_SECONDS));
     },
+
+    async saveSession(id, session, ttlSeconds) {
+      await command("SET", `session:${id}`, JSON.stringify(session), "EX", String(ttlSeconds));
+    },
+    async getSession(id) {
+      const raw = await command("GET", `session:${id}`);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async deleteSession(id) {
+      await command("DEL", `session:${id}`);
+    },
+
+    /** Increments a windowed counter and returns the new count — used to throttle login attempts. */
+    async bumpRateLimit(key, windowSeconds) {
+      const count = await command("INCR", `ratelimit:${key}`);
+      // Only set the expiry on first increment, so the window doesn't slide
+      // forward with every attempt and let an attacker keep it alive forever.
+      if (count === 1) await command("EXPIRE", `ratelimit:${key}`, String(windowSeconds));
+      return count;
+    },
   };
 }

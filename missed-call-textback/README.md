@@ -182,6 +182,38 @@ Content-Type: application/json
    lead is captured automatically from there — the automation's job ends
    at step 4.
 
+## Leads dashboard
+
+`/` serves a password-protected dashboard of captured leads — name, number
+(tap to call), problem, area, urgency, time — newest first, with emergency
+leads outlined in red. It's server-rendered with no client-side JS, sized
+for a phone, since that's where Mohamed will read it.
+
+Set a password before it will serve anything:
+
+```bash
+node scripts/hash-password.mjs "the password you want"
+# paste the salt:hash output into DASHBOARD_PASSWORD_HASH
+```
+
+With `DASHBOARD_PASSWORD_HASH` unset the dashboard returns 503 rather than
+running open — it holds customer PII, so failing closed is the only safe
+default.
+
+Security notes, because this is a public URL holding customer data:
+
+- The password is stored only as a salted scrypt hash, compared in constant
+  time. The plaintext is never written anywhere.
+- Sessions are random 32-byte ids in `HttpOnly; Secure; SameSite=Strict`
+  cookies, held server-side in Redis with a 7-day TTL. Signing out deletes
+  the session server-side, so the cookie alone is worthless afterwards.
+- Failed logins are rate limited per IP (10 per 15 minutes).
+- **Every lead field is escaped before rendering.** Names, problems and
+  areas are customer-controlled text arriving over WhatsApp, so a customer
+  whose "name" is `<script>…` is a stored-XSS attempt against Mohamed's
+  browser. `lib/views.mjs` escapes all of it; `test/dashboard.test.mjs`
+  covers that specifically.
+
 ## Duplicate protection
 
 - **Same missed call sent twice / automation retries**: `/missed-call`
