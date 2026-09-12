@@ -34,7 +34,7 @@ function freshConversation(callerNumber) {
  * store; returns a summary of what happened for logging/tests.
  */
 export async function handleInboundMessage({ from, text }, { store, wa, config, templates }) {
-  const existing = store.getConversation(from);
+  const existing = await store.getConversation(from);
   // A reply after the lead is already complete is a new job, not more
   // detail for the old one — start clean rather than re-completing (and
   // re-notifying the owner about) the same lead on every later message.
@@ -69,7 +69,7 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
 
   if (!missing) {
     const lead = createLead({ callerNumber: from, fields: conversation.fields, emergency: conversation.emergency });
-    store.saveLead(lead);
+    await store.saveLead(lead);
     conversation.completed = true;
     conversation.awaiting = null;
     result.leadCompleted = true;
@@ -90,6 +90,6 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
   }
 
   conversation.updatedAt = new Date().toISOString();
-  store.saveConversation(from, conversation);
+  await store.saveConversation(from, conversation);
   return result;
 }

@@ -30,35 +30,35 @@ export function createStore(filePath) {
   }
 
   return {
-    getConversation(callerNumber) {
+    async getConversation(callerNumber) {
       return data.conversations[callerNumber] ?? null;
     },
-    saveConversation(callerNumber, state) {
+    async saveConversation(callerNumber, state) {
       data.conversations[callerNumber] = state;
       persist();
     },
 
-    saveLead(lead) {
+    async saveLead(lead) {
       data.leads[lead.id] = lead;
       persist();
     },
-    listLeads() {
+    async listLeads() {
       return Object.values(data.leads);
     },
 
-    hasProcessedMessage(id) {
+    async hasProcessedMessage(id) {
       return Boolean(data.processedMessages[id]);
     },
-    markMessageProcessed(id) {
+    async markMessageProcessed(id) {
       data.processedMessages[id] = Date.now();
       persist();
     },
 
     /** Returns the timestamp (ms) the caller last triggered a missed-call template, or null. */
-    lastMissedCallAt(callerNumber) {
+    async lastMissedCallAt(callerNumber) {
       return data.processedMissedCalls[callerNumber] ?? null;
     },
-    markMissedCall(callerNumber, atMs) {
+    async markMissedCall(callerNumber, atMs) {
       data.processedMissedCalls[callerNumber] = atMs;
       persist();
     },

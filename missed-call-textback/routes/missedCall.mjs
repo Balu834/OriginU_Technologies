@@ -43,7 +43,7 @@ export async function handleMissedCall(ctx, { config, store, wa }) {
     return { status: 200, body: { sent: false, reason: "ignored own number" } };
   }
 
-  const lastAt = store.lastMissedCallAt(caller);
+  const lastAt = await store.lastMissedCallAt(caller);
   if (lastAt && Date.now() - lastAt < DEDUPE_WINDOW_MS) {
     log("missed_call_deduped", { callerNumber: caller });
     return { status: 200, body: { sent: false, deduped: true } };
@@ -51,10 +51,10 @@ export async function handleMissedCall(ctx, { config, store, wa }) {
 
   log("missed_call_received", { callerNumber: caller });
 
-  const sent = await wa.sendTemplate(caller, config.WHATSAPP_MISSED_CALL_TEMPLATE, config.WHATSAPP_TEMPLATE_LANGUAGE, [
-    config.BUSINESS_NAME,
-    config.OWNER_NAME,
-  ]);
+  const sent = await wa.sendTemplate(caller, config.WHATSAPP_MISSED_CALL_TEMPLATE, config.WHATSAPP_TEMPLATE_LANGUAGE, {
+    business_name: config.BUSINESS_NAME,
+    owner_name: config.OWNER_NAME,
+  });
 
   if (!sent.ok) {
     // Don't mark as sent — a retry within the dedupe window should still
@@ -62,7 +62,7 @@ export async function handleMissedCall(ctx, { config, store, wa }) {
     return { status: 502, body: { sent: false, error: "failed to send WhatsApp template" } };
   }
 
-  store.markMissedCall(caller, Date.now());
+  await store.markMissedCall(caller, Date.now());
 
   log("whatsapp_template_sent", { callerNumber: caller, template: config.WHATSAPP_MISSED_CALL_TEMPLATE });
   return { status: 200, body: { sent: true, template: config.WHATSAPP_MISSED_CALL_TEMPLATE } };

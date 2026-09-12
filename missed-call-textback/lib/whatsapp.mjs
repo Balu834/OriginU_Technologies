@@ -26,15 +26,34 @@ export function createWhatsAppClient(config, { fetchImpl = fetch } = {}) {
   }
 
   return {
-    sendTemplate(to, templateName, languageCode, bodyParams = []) {
+    /**
+     * `bodyParams` is a { variableName: value } object matching the
+     * template's named variables in WhatsApp Manager (e.g.
+     * { business_name: "Planet Electrical", owner_name: "Mohamed" }) —
+     * Meta's newer templates require each parameter to declare which
+     * named variable it fills via `parameter_name`, positional {{1}}/{{2}}
+     * substitution alone is no longer accepted for templates created with
+     * named variables.
+     */
+    sendTemplate(to, templateName, languageCode, bodyParams = {}) {
+      const entries = Object.entries(bodyParams);
       return send({
         to,
         type: "template",
         template: {
           name: templateName,
           language: { code: languageCode },
-          components: bodyParams.length
-            ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }]
+          components: entries.length
+            ? [
+                {
+                  type: "body",
+                  parameters: entries.map(([parameter_name, text]) => ({
+                    type: "text",
+                    parameter_name,
+                    text,
+                  })),
+                },
+              ]
             : [],
         },
       });

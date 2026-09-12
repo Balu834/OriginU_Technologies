@@ -58,7 +58,7 @@ async function main() {
   await handleInboundMessage({ from: emergencyCaller, text: "There is smoke coming from the switch" }, { store, wa, config, templates });
 
   console.log("\n=== Lead(s) captured ===");
-  console.log(JSON.stringify(store.listLeads(), null, 2));
+  console.log(JSON.stringify(await store.listLeads(), null, 2));
   console.log("\n=== End of simulated demo ===");
 }
 

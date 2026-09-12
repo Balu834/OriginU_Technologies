@@ -25,7 +25,7 @@ export function createFakeWa() {
   const sent = [];
   return {
     sent,
-    sendTemplate(to, templateName, languageCode, bodyParams = []) {
+    sendTemplate(to, templateName, languageCode, bodyParams = {}) {
       sent.push({ kind: "template", to, templateName, languageCode, bodyParams });
       return Promise.resolve({ ok: true, status: 200, body: {} });
     },

@@ -49,11 +49,11 @@ export function handleWebhookPost(ctx, deps) {
             if (!msg.id) {
               log("message_missing_id", { type: msg.type });
             } else {
-              if (store.hasProcessedMessage(msg.id)) {
+              if (await store.hasProcessedMessage(msg.id)) {
                 log("duplicate_message_ignored", { messageId: msg.id });
                 continue;
               }
-              store.markMessageProcessed(msg.id);
+              await store.markMessageProcessed(msg.id);
             }
 
             if (msg.type !== "text") {
