@@ -23,7 +23,8 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-const STYLES = `
+/** Shared palette and type stacks — the public landing page imports these so the two surfaces match. */
+export const TOKENS = `
   :root {
     color-scheme: light dark;
     --bg:#f4f1ea; --card:#fffdf8; --ink:#16130f; --muted:#6b6255;
@@ -42,6 +43,10 @@ const STYLES = `
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     }
   }
+`;
+
+const STYLES = `
+  ${TOKENS}
   * { box-sizing:border-box; }
   html { -webkit-text-size-adjust:100%; }
   body {

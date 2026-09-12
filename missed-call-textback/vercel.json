@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/", "destination": "/api/dashboard" },
+    { "source": "/", "destination": "/api/landing" },
+    { "source": "/leads", "destination": "/api/dashboard" },
     { "source": "/login", "destination": "/api/login" },
     { "source": "/logout", "destination": "/api/logout" },
     { "source": "/missed-call", "destination": "/api/missed-call" },

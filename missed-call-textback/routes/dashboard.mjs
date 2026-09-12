@@ -1,8 +1,14 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
 import { loginPage, dashboardPage } from "../lib/views.mjs";
+import { landingPage } from "../lib/landing.mjs";
 import { log } from "../lib/logger.mjs";
 
-/** GET / — the leads dashboard, or the login form when there's no valid session. */
+/** GET / — the public pitch. No auth, no customer data on it. */
+export function handleLanding(ctx, { config }) {
+  return { status: 200, html: landingPage({ businessName: config.BUSINESS_NAME || "us" }) };
+}
+
+/** GET /leads — the leads dashboard, or the login form when there's no valid session. */
 export async function handleDashboard(ctx, { store, config }) {
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
@@ -35,7 +41,7 @@ export async function handleLogin(ctx, { store, config }) {
   log("dashboard_login_succeeded", {});
   return {
     status: 302,
-    headers: { Location: "/", "Set-Cookie": sessionCookie(id) },
+    headers: { Location: "/leads", "Set-Cookie": sessionCookie(id) },
     body: {},
   };
 }
@@ -46,7 +52,7 @@ export async function handleLogout(ctx, { store }) {
   if (id) await store.deleteSession(id);
   return {
     status: 302,
-    headers: { Location: "/", "Set-Cookie": clearedCookie() },
+    headers: { Location: "/leads", "Set-Cookie": clearedCookie() },
     body: {},
   };
 }

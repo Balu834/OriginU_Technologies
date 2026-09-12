@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { hashPassword, verifyPassword, parseCookies, COOKIE_NAME } from "../lib/auth.mjs";
 import { escapeHtml, dashboardPage } from "../lib/views.mjs";
-import { handleDashboard, handleLogin, handleLogout } from "../routes/dashboard.mjs";
+import { handleLanding, handleDashboard, handleLogin, handleLogout } from "../routes/dashboard.mjs";
 import { createTestDeps } from "./helpers.mjs";
 
 const PASSWORD = "correct horse battery staple";
@@ -51,7 +51,7 @@ test("correct password sets a hardened session cookie and redirects", async () =
   const deps = depsWithPassword();
   const res = await handleLogin(formCtx(PASSWORD), deps);
   assert.equal(res.status, 302);
-  assert.equal(res.headers.Location, "/");
+  assert.equal(res.headers.Location, "/leads");
   const cookie = res.headers["Set-Cookie"];
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /Secure/);
@@ -108,6 +108,29 @@ test("the dashboard refuses to serve when no password is configured", async () =
   const deps = createTestDeps({ DASHBOARD_PASSWORD_HASH: "" });
   const res = await handleDashboard({ headers: {} }, deps);
   assert.equal(res.status, 503);
+});
+
+test("the public landing page serves without a session", async () => {
+  const deps = depsWithPassword();
+  const res = await handleLanding({ headers: {} }, deps);
+  assert.equal(res.status, 200);
+  assert.match(res.html, /How it works/);
+  assert.doesNotMatch(res.html, /type="password"/, "the pitch page should not be a login form");
+});
+
+test("the landing page leaks no lead data, session or not", async () => {
+  const deps = depsWithPassword();
+  // Values deliberately unlike anything in the page's own sample conversation,
+  // so a hit means real stored data escaped rather than matching illustrative copy.
+  await deps.store.saveLead({
+    id: "l9", callerNumber: "+915550001234", name: "Zzyzx Quimby", area: "Nowhereville",
+    problem: "flux capacitor sparking", createdAt: new Date().toISOString(),
+  });
+
+  const res = await handleLanding({ headers: {} }, deps);
+  assert.doesNotMatch(res.html, /Zzyzx Quimby/);
+  assert.doesNotMatch(res.html, /915550001234/);
+  assert.doesNotMatch(res.html, /Nowhereville/);
 });
 
 test("escapeHtml neutralises markup", () => {
