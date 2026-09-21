@@ -1,6 +1,7 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
 import { loginPage, dashboardPage } from "../lib/views.mjs";
 import { isValidStatus } from "../lib/leads.mjs";
+import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { landingPage } from "../lib/landing.mjs";
 import { log } from "../lib/logger.mjs";
 
@@ -10,7 +11,7 @@ export function handleLanding(ctx, { config }) {
 }
 
 /** GET /leads — the leads dashboard, or the login form when there's no valid session. */
-export async function handleDashboard(ctx, { store, config }) {
+export async function handleDashboard(ctx, { store, config, businesses }) {
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
   }
@@ -23,8 +24,24 @@ export async function handleDashboard(ctx, { store, config }) {
     urgency: ctx.query?.get("urgency") ?? "",
   };
 
-  const leads = await store.listLeads();
+  // Leads are read through a store scoped to the session's business, so
+  // the dashboard cannot return another tenant's data even if a filter is
+  // wrong — the keys simply aren't reachable.
+  const tenantStore = tenantStoreFor(session, store, businesses);
+  const leads = await tenantStore.listLeads();
   return { status: 200, html: dashboardPage(leads, query) };
+}
+
+/**
+ * Resolves the store a signed-in session is allowed to touch. The business
+ * comes from the session record, never from the request, so a crafted
+ * query string can't select someone else's tenant.
+ */
+function tenantStoreFor(session, store, businesses) {
+  if (!businesses) return store;
+  const business = businesses.byId(session?.businessId ?? "default");
+  if (!business) throw new Error("session is not bound to a known business");
+  return scopedToBusiness(store, business.id);
 }
 
 /**
@@ -34,9 +51,13 @@ export async function handleDashboard(ctx, { store, config }) {
  * against the known set rather than written through, so a crafted form
  * post can't put arbitrary values on a lead.
  */
-export async function handleLeadStatus(ctx, { store }) {
+export async function handleLeadStatus(ctx, { store, businesses }) {
   const session = await currentSession(ctx, store);
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
+
+  // Same scoping as the read path: a lead id from another tenant simply
+  // doesn't resolve here, so it can't be mutated across the boundary.
+  const tenantStore = tenantStoreFor(session, store, businesses);
 
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
   const id = form.get("id") ?? "";
@@ -48,13 +69,13 @@ export async function handleLeadStatus(ctx, { store }) {
     return { status: 302, headers: { Location: "/leads" }, body: {} };
   }
 
-  const lead = await store.getLead(id);
+  const lead = await tenantStore.getLead(id);
   if (!lead) {
     log("lead_status_rejected", { reason: "unknown lead" });
     return { status: 302, headers: { Location: "/leads" }, body: {} };
   }
 
-  await store.saveLead({ ...lead, status, updatedAt: new Date().toISOString() });
+  await tenantStore.saveLead({ ...lead, status, updatedAt: new Date().toISOString() });
   log("lead_status_changed", { leadId: id, status });
 
   // `back` only ever carries our own filter params; rebuilding it through

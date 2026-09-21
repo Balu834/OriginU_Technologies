@@ -7,6 +7,7 @@
 import { loadConfig, findMissingConfig } from "../config.mjs";
 import { createRedisStore } from "../lib/store.redis.mjs";
 import { createWhatsAppClient } from "../lib/whatsapp.mjs";
+import { createBusinessRegistry, businessFromConfig } from "../lib/businesses.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -22,7 +23,8 @@ export function getDeps() {
 
   const store = createRedisStore(process.env);
   const wa = createWhatsAppClient(config);
-  cached = { config, store, wa, templates };
+  const businesses = createBusinessRegistry([businessFromConfig(config)]);
+  cached = { config, store, wa, templates, businesses };
   return cached;
 }
 

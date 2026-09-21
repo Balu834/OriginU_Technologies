@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { isValidE164, normalizePhone } from "../lib/phone.mjs";
+import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { log } from "../lib/logger.mjs";
 
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000; // resending the template within 10 min of a missed call is treated as a duplicate/retry
@@ -21,10 +22,28 @@ function extractBearerToken(authHeader) {
  * POST /missed-call — called by the phone automation (MacroDroid/Tasker).
  * Auth: `Authorization: Bearer <MISSED_CALL_API_KEY>`.
  */
-export async function handleMissedCall(ctx, { config, store, wa }) {
+export async function handleMissedCall(ctx, { config, store, wa, businesses }) {
   const token = extractBearerToken(ctx.headers.authorization);
-  if (!token || !timingSafeEqualStr(token, config.MISSED_CALL_API_KEY)) {
+
+  // The API key identifies which business the automation belongs to, so
+  // authentication and tenant resolution are the same step — a key can
+  // only ever write into its own business's data.
+  const business = businesses ? businesses.byApiKey(token, timingSafeEqualStr) : null;
+  const authorised = businesses ? Boolean(business) : token && timingSafeEqualStr(token, config.MISSED_CALL_API_KEY);
+  if (!authorised) {
     return { status: 401, body: { error: "unauthorized" } };
+  }
+
+  if (business) {
+    store = scopedToBusiness(store, business.id);
+    config = {
+      ...config,
+      BUSINESS_NAME: business.name,
+      OWNER_NAME: business.ownerName,
+      MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp,
+      WHATSAPP_MISSED_CALL_TEMPLATE: business.missedCallTemplate,
+      WHATSAPP_TEMPLATE_LANGUAGE: business.templateLanguage,
+    };
   }
 
   const { callerNumber, timestamp } = ctx.json ?? {};

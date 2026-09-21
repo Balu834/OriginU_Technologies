@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig, findMissingConfig } from "./config.mjs";
 import { createStore } from "./lib/store.mjs";
 import { createWhatsAppClient } from "./lib/whatsapp.mjs";
+import { createBusinessRegistry, businessFromConfig } from "./lib/businesses.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { handleHealth } from "./routes/health.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
@@ -34,7 +35,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export function buildApp(config) {
   const store = createStore(path.join(config.DATA_DIR, "db.json"));
   const wa = createWhatsAppClient(config);
-  const deps = { config, store, wa, templates };
+  const businesses = createBusinessRegistry([businessFromConfig(config)]);
+  const deps = { config, store, wa, templates, businesses };
 
   /** Dispatches one request. Returns { status, body? , rawText?, afterAck? }. */
   async function handle(ctx) {

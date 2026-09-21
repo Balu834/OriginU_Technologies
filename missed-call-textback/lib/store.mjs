@@ -10,6 +10,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export { scopedToBusiness } from "./store.redis.mjs";
+
 const EMPTY = () => ({
   leads: {},
   conversations: {},
@@ -56,15 +58,20 @@ export function createStore(filePath) {
       persist();
     },
 
-    async saveLead(lead) {
-      data.leads[lead.id] = lead;
+    // `ns` is the tenant prefix supplied by scopedToBusiness — see
+    // lib/store.redis.mjs. Both backends namespace identically so tests
+    // against the in-memory store prove the same isolation as production.
+    async saveLead(lead, ns = "") {
+      data.leads[`${ns}${lead.id}`] = lead;
       persist();
     },
     async getLead(id) {
       return data.leads[id] ?? null;
     },
-    async listLeads() {
-      return Object.values(data.leads);
+    async listLeads(ns = "") {
+      return Object.entries(data.leads)
+        .filter(([key]) => key.startsWith(ns) && (ns || !key.startsWith("b:")))
+        .map(([, lead]) => lead);
     },
 
     async hasProcessedMessage(id) {

@@ -21,6 +21,33 @@
 const MISSED_CALL_TTL_SECONDS = 10 * 60; // matches routes/missedCall.mjs's dedupe window
 const PROCESSED_MESSAGE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days is far beyond any realistic Meta retry window
 
+/**
+ * Scopes a store to one business. Tenant isolation is structural: the
+ * business id is baked into every key, so there is no code path that can
+ * read another tenant's data by forgetting a filter. Callers get a scoped
+ * store or nothing.
+ */
+export function scopedToBusiness(store, businessId) {
+  if (!businessId) throw new Error("scopedToBusiness requires a business id");
+  const ns = `b:${businessId}:`;
+  return {
+    getConversation: (n) => store.getConversation(ns + n),
+    saveConversation: (n, s) => store.saveConversation(ns + n, s),
+    getLead: (id) => store.getLead(ns + id),
+    saveLead: (lead) => store.saveLead({ ...lead, businessId, id: lead.id }, ns),
+    listLeads: () => store.listLeads(ns),
+    hasProcessedMessage: (id) => store.hasProcessedMessage(ns + id),
+    markMessageProcessed: (id) => store.markMessageProcessed(ns + id),
+    lastMissedCallAt: (n) => store.lastMissedCallAt(ns + n),
+    markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
+    // Sessions and rate limits are deployment-wide, not per-tenant.
+    saveSession: store.saveSession,
+    getSession: store.getSession,
+    deleteSession: store.deleteSession,
+    bumpRateLimit: store.bumpRateLimit,
+  };
+}
+
 export function createRedisStore(env = process.env) {
   const url = env.KV_REST_API_URL;
   const token = env.KV_REST_API_TOKEN;
@@ -48,18 +75,21 @@ export function createRedisStore(env = process.env) {
       await command("SET", `conversation:${callerNumber}`, JSON.stringify(state));
     },
 
-    async saveLead(lead) {
-      await command("SET", `lead:${lead.id}`, JSON.stringify(lead));
-      await command("SADD", "leads:index", lead.id);
+    // `ns` is the tenant prefix supplied by scopedToBusiness; the index key
+    // is namespaced too, so one business's index can never enumerate
+    // another's leads.
+    async saveLead(lead, ns = "") {
+      await command("SET", `lead:${ns}${lead.id}`, JSON.stringify(lead));
+      await command("SADD", `${ns}leads:index`, lead.id);
     },
     async getLead(id) {
       const raw = await command("GET", `lead:${id}`);
       return raw ? JSON.parse(raw) : null;
     },
-    async listLeads() {
-      const ids = (await command("SMEMBERS", "leads:index")) ?? [];
+    async listLeads(ns = "") {
+      const ids = (await command("SMEMBERS", `${ns}leads:index`)) ?? [];
       if (!ids.length) return [];
-      const raws = await command("MGET", ...ids.map((id) => `lead:${id}`));
+      const raws = await command("MGET", ...ids.map((id) => `lead:${ns}${id}`));
       return raws.filter(Boolean).map((r) => JSON.parse(r));
     },
 

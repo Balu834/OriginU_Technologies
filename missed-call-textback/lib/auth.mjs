@@ -70,9 +70,14 @@ export async function currentSession(ctx, store) {
   return store.getSession(id);
 }
 
-export async function createSession(store) {
+/**
+ * The session records which business the signed-in user may read. Every
+ * authorization decision reads it from here, never from the request, so a
+ * crafted parameter can't select another tenant.
+ */
+export async function createSession(store, businessId = "default") {
   const id = crypto.randomBytes(32).toString("hex");
-  await store.saveSession(id, { createdAt: new Date().toISOString() }, SESSION_TTL_SECONDS);
+  await store.saveSession(id, { businessId, createdAt: new Date().toISOString() }, SESSION_TTL_SECONDS);
   return id;
 }
 

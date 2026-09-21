@@ -1,4 +1,5 @@
 import { verifySignature } from "../lib/whatsapp.mjs";
+import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
 
@@ -22,7 +23,7 @@ export function verifyWebhookGet(ctx, { config }) {
  * each is wrapped in its own try/catch.
  */
 export function handleWebhookPost(ctx, deps) {
-  const { config, store, wa, templates } = deps;
+  const { config, store, wa, templates, businesses } = deps;
 
   const valid = verifySignature(ctx.rawBody, ctx.headers["x-hub-signature-256"], config.META_APP_SECRET);
   if (!valid) {
@@ -63,16 +64,33 @@ export function handleWebhookPost(ctx, deps) {
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
+        // Attribute the delivery to a business before touching any data.
+        // Meta tells us which of our numbers the customer messaged; if it
+        // isn't one we know, the event is dropped rather than guessed at —
+        // defaulting to "the first business" is how tenants leak into
+        // each other.
+        const phoneNumberId = change.value?.metadata?.phone_number_id;
+        const business = businesses?.byPhoneNumberId(phoneNumberId) ?? null;
+        if (businesses && !business) {
+          log("webhook_unknown_business", { phoneNumberId: phoneNumberId ? "present" : "missing" });
+          continue;
+        }
+        const tenantStore = business ? scopedToBusiness(store, business.id) : store;
+        const tenantConfig = business
+          ? { ...config, BUSINESS_NAME: business.name, OWNER_NAME: business.ownerName,
+              MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp }
+          : config;
+
         for (const msg of change.value?.messages ?? []) {
           try {
             if (!msg.id) {
               log("message_missing_id", { type: msg.type });
             } else {
-              if (await store.hasProcessedMessage(msg.id)) {
+              if (await tenantStore.hasProcessedMessage(msg.id)) {
                 log("duplicate_message_ignored", { messageId: msg.id });
                 continue;
               }
-              await store.markMessageProcessed(msg.id);
+              await tenantStore.markMessageProcessed(msg.id);
             }
 
             if (msg.type !== "text") {
@@ -81,9 +99,12 @@ export function handleWebhookPost(ctx, deps) {
             }
 
             const from = msg.from.startsWith("+") ? msg.from : `+${msg.from}`;
-            log("customer_reply_received", { from });
+            log("customer_reply_received", { from, businessId: business?.id });
 
-            const result = await handleInboundMessage({ from, text: msg.text.body }, { store, wa, config, templates });
+            const result = await handleInboundMessage(
+              { from, text: msg.text.body },
+              { store: tenantStore, wa, config: tenantConfig, templates }
+            );
             if (result.emergency) log("emergency_detected", { from });
             if (result.leadCompleted) log("lead_completed", { from, leadId: result.lead?.id });
           } catch (err) {
