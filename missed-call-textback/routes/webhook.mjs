@@ -42,6 +42,25 @@ export function handleWebhookPost(ctx, deps) {
       logError("webhook_malformed_payload", new Error("invalid JSON"), {});
       return;
     }
+    // Shape-only summary, logged for every delivery. Meta sends status
+    // receipts and inbound messages to the same URL, and without this the
+    // two are indistinguishable in the request log — which makes "did the
+    // customer's reply actually arrive?" impossible to answer from logs.
+    // Deliberately counts and types only: no message text, no PII.
+    for (const entry of payload.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        const value = change.value ?? {};
+        log("webhook_payload_received", {
+          field: change.field,
+          messages: (value.messages ?? []).length,
+          statuses: (value.statuses ?? []).length,
+          messageTypes: (value.messages ?? []).map((m) => m.type).join(",") || "-",
+          statusTypes: (value.statuses ?? []).map((s) => s.status).join(",") || "-",
+          errors: (value.errors ?? []).length,
+        });
+      }
+    }
+
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         for (const msg of change.value?.messages ?? []) {
