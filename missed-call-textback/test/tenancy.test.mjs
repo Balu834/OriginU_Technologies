@@ -184,3 +184,57 @@ test("the env-configured business still resolves, so the live deployment is unch
   assert.equal(registry.byPhoneNumberId(TEST_CONFIG.META_PHONE_NUMBER_ID).id, "default");
   assert.equal(registry.byId("default").name, TEST_CONFIG.BUSINESS_NAME);
 });
+
+test("a single-business deployment still processes a message with an unexpected phone_number_id", async () => {
+  // Guards the live test: strict matching on a one-tenant deployment would
+  // turn any surprise in Meta's payload into a silently dropped customer.
+  const store = createStore(null);
+  const deps = {
+    store,
+    businesses: createBusinessRegistry([businessFromConfig(TEST_CONFIG)]),
+    wa: createFakeWa(), templates, config: TEST_CONFIG,
+  };
+  const payload = {
+    entry: [{ changes: [{ value: {
+      metadata: { phone_number_id: "an-id-we-did-not-expect" },
+      messages: [{ id: "wamid.SURPRISE", from: "919505141818", type: "text", text: { body: "AC not cooling" }, timestamp: "1" }],
+    } }] }],
+  };
+  const rawBody = Buffer.from(JSON.stringify(payload));
+  await handleWebhookPost({ rawBody, headers: { "x-hub-signature-256": signBody(rawBody) } }, deps).afterAck();
+
+  assert.ok(await scopedToBusiness(store, "default").getConversation("+919505141818"),
+    "a lone business must still receive the message rather than drop it");
+});
+
+test("a single-business deployment processes a message with no metadata at all", async () => {
+  const store = createStore(null);
+  const deps = {
+    store,
+    businesses: createBusinessRegistry([businessFromConfig(TEST_CONFIG)]),
+    wa: createFakeWa(), templates, config: TEST_CONFIG,
+  };
+  const payload = {
+    entry: [{ changes: [{ value: {
+      messages: [{ id: "wamid.NOMETA", from: "919505141818", type: "text", text: { body: "AC not cooling" }, timestamp: "1" }],
+    } }] }],
+  };
+  const rawBody = Buffer.from(JSON.stringify(payload));
+  await handleWebhookPost({ rawBody, headers: { "x-hub-signature-256": signBody(rawBody) } }, deps).afterAck();
+
+  assert.ok(await scopedToBusiness(store, "default").getConversation("+919505141818"));
+});
+
+test("with two businesses an unrecognised id is still a hard drop", async () => {
+  const deps = twoTenantDeps();
+  const payload = {
+    entry: [{ changes: [{ value: {
+      metadata: { phone_number_id: "999999" },
+      messages: [{ id: "wamid.AMBIG", from: "919505141818", type: "text", text: { body: "AC not cooling" }, timestamp: "1" }],
+    } }] }],
+  };
+  const rawBody = Buffer.from(JSON.stringify(payload));
+  await handleWebhookPost({ rawBody, headers: { "x-hub-signature-256": signBody(rawBody) } }, deps).afterAck();
+
+  assert.equal(deps.wa.sent.length, 0, "ambiguous attribution must never be guessed");
+});

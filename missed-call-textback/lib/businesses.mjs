@@ -53,8 +53,19 @@ export function createBusinessRegistry(businesses) {
      */
     byPhoneNumberId(phoneNumberId) {
       const wanted = String(phoneNumberId ?? "");
-      if (!wanted) return null;
-      return all.find((b) => b.phoneNumberId && b.phoneNumberId === wanted) ?? null;
+      const match = wanted ? all.find((b) => b.phoneNumberId && b.phoneNumberId === wanted) : null;
+      if (match) return match;
+
+      // With exactly one business there is no tenant to confuse it with, so
+      // an unrecognised or absent id is attributed to it rather than
+      // dropped. Strict matching on a single-tenant deployment would turn
+      // any surprise in Meta's payload — a renumbered id, a missing
+      // metadata block — into silently discarded customer messages. The
+      // moment a second business exists this stops applying and a
+      // mismatch is a hard drop, because then attribution can be *wrong*
+      // rather than merely unconfirmed.
+      if (all.length === 1) return { ...all[0], attributionAssumed: true };
+      return null;
     },
 
     /**
