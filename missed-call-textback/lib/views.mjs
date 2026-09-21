@@ -139,6 +139,9 @@ const STYLES = `
   .error { margin:14px 0 0; padding:10px 12px; background:var(--urgent-wash);
            border-left:3px solid var(--urgent); color:var(--urgent); font-size:14px; border-radius:2px; }
 
+  .undelivered { margin:0 0 12px; padding:9px 11px; font-size:13.5px; border-radius:0 3px 3px 0;
+                 border-left:3px solid var(--urgent); background:var(--urgent-wash); color:var(--urgent); }
+
   /* ---- filters ---- */
   .filters { margin-bottom:20px; }
   .filters input[type=search] { width:100%; padding:11px 13px; font-size:16px; border:1px solid var(--line);
@@ -283,6 +286,9 @@ function leadCard(lead, query) {
         <span class="status status-${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status])}</span>
       </div>
       <div class="when">${escapeHtml(formatWhen(lead.createdAt))}</div>
+      ${lead.ownerNotified === false
+        ? `<p class="undelivered">WhatsApp alert for this lead failed to send — it only exists here.</p>`
+        : ""}
       <dl class="facts">
         ${fact("Problem", lead.problem)}
         ${fact("Area", lead.area)}

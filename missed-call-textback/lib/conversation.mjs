@@ -8,6 +8,7 @@
 import { isEmergency } from "./emergency.mjs";
 import { extractFields, applyAwaitingFallback, nextMissingField } from "./extract.mjs";
 import { createLead, formatOwnerNotification } from "./leads.mjs";
+import { logError } from "./logger.mjs";
 
 const QUESTION_KEY = { problem: "ask_problem", area: "ask_area", name: "ask_name", urgency: "ask_urgency" };
 
@@ -67,29 +68,50 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
 
   const missing = nextMissingField(conversation.fields);
 
+  // Decide the whole next state, then persist it BEFORE any outbound send.
+  // The webhook marks a message id processed before calling us, so Meta's
+  // retry of the same message is skipped as a duplicate — if we only saved
+  // after sending, a transient WhatsApp failure would discard what the
+  // customer just told us and no retry would ever recover it.
+  let lead = null;
   if (!missing) {
-    const lead = createLead({ callerNumber: from, fields: conversation.fields, emergency: conversation.emergency });
-    await store.saveLead(lead);
+    lead = createLead({ callerNumber: from, fields: conversation.fields, emergency: conversation.emergency });
     conversation.completed = true;
     conversation.awaiting = null;
     result.leadCompleted = true;
     result.lead = lead;
-
-    await wa.sendText(
-      from,
-      fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME])
-    );
-    // Always send the completed-lead notification, even after an earlier
-    // emergency alert — that alert had none of the name/area/problem
-    // details this one carries, so it's not a duplicate.
-    await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead));
   } else {
     conversation.awaiting = missing;
-    const question = templates._conversation[QUESTION_KEY[missing]];
-    await wa.sendText(from, fillTemplate(question, [conversation.fields.name || ""]));
   }
 
   conversation.updatedAt = new Date().toISOString();
   await store.saveConversation(from, conversation);
+  if (lead) await store.saveLead(lead);
+
+  // Everything below is best-effort delivery. State is already durable.
+  if (lead) {
+    await wa.sendText(
+      from,
+      fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME])
+    );
+
+    // Always notify on completion, even after an earlier emergency alert —
+    // that alert carried none of the name/area/problem detail this one does.
+    const notified = await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead));
+
+    // A lead the owner never hears about is the one failure that destroys
+    // this product's whole value, so record it rather than letting it pass
+    // silently — the dashboard surfaces any lead still marked undelivered.
+    const ownerNotified = notified?.ok !== false;
+    if (!ownerNotified) {
+      logError("owner_notification_failed", new Error(`status ${notified?.status ?? "unknown"}`), { leadId: lead.id });
+    }
+    await store.saveLead({ ...lead, ownerNotified, updatedAt: new Date().toISOString() });
+    result.ownerNotified = ownerNotified;
+  } else {
+    const question = templates._conversation[QUESTION_KEY[missing]];
+    await wa.sendText(from, fillTemplate(question, [conversation.fields.name || ""]));
+  }
+
   return result;
 }
