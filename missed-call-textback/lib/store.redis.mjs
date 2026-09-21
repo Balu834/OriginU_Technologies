@@ -52,6 +52,10 @@ export function createRedisStore(env = process.env) {
       await command("SET", `lead:${lead.id}`, JSON.stringify(lead));
       await command("SADD", "leads:index", lead.id);
     },
+    async getLead(id) {
+      const raw = await command("GET", `lead:${id}`);
+      return raw ? JSON.parse(raw) : null;
+    },
     async listLeads() {
       const ids = (await command("SMEMBERS", "leads:index")) ?? [];
       if (!ids.length) return [];

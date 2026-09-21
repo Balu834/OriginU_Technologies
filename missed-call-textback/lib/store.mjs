@@ -60,6 +60,9 @@ export function createStore(filePath) {
       data.leads[lead.id] = lead;
       persist();
     },
+    async getLead(id) {
+      return data.leads[id] ?? null;
+    },
     async listLeads() {
       return Object.values(data.leads);
     },

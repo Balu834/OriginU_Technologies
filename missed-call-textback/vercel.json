@@ -3,6 +3,7 @@
   "rewrites": [
     { "source": "/", "destination": "/api/landing" },
     { "source": "/leads", "destination": "/api/dashboard" },
+    { "source": "/leads/status", "destination": "/api/lead-status" },
     { "source": "/login", "destination": "/api/login" },
     { "source": "/logout", "destination": "/api/logout" },
     { "source": "/missed-call", "destination": "/api/missed-call" },

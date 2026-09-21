@@ -14,6 +14,8 @@
  * CDN request or a base64 payload on every page load, and neither is worth
  * it on Indian mobile data.
  */
+import { LEAD_STATUSES, STATUS_LABELS, isValidStatus } from "./leads.mjs";
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -137,6 +139,41 @@ const STYLES = `
   .error { margin:14px 0 0; padding:10px 12px; background:var(--urgent-wash);
            border-left:3px solid var(--urgent); color:var(--urgent); font-size:14px; border-radius:2px; }
 
+  /* ---- filters ---- */
+  .filters { margin-bottom:20px; }
+  .filters input[type=search] { width:100%; padding:11px 13px; font-size:16px; border:1px solid var(--line);
+                                border-radius:3px; background:var(--card); color:var(--ink); }
+  .filters input[type=search]:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+  .filter-row { display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap; }
+  .filters select { flex:1; min-width:130px; padding:9px 10px; font-size:14px; border:1px solid var(--line);
+                    border-radius:3px; background:var(--card); color:var(--ink); }
+  .filters button { padding:9px 16px; font-size:14px; font-weight:600; border:0; border-radius:3px;
+                    background:var(--accent); color:var(--accent-ink); cursor:pointer; }
+  .filters .clear { font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+                    color:var(--muted); text-decoration:none; }
+  @media (hover:hover) { .filters .clear:hover { color:var(--ink); } }
+
+  /* ---- status ---- */
+  .status { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.12em;
+            text-transform:uppercase; padding:3px 7px; border-radius:2px; white-space:nowrap;
+            border:1px solid var(--line); color:var(--muted); }
+  .status-new { border-color:var(--accent); color:var(--accent); }
+  .status-contacted, .status-in_progress { border-color:var(--ink); color:var(--ink); }
+  .status-completed { border-color:var(--accent); background:var(--accent); color:var(--accent-ink); }
+  .status-lost { opacity:.65; }
+  .lead.s-completed, .lead.s-lost { opacity:.72; }
+
+  .statusbar { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px;
+               padding-top:12px; border-top:1px solid var(--line); }
+  .statusbar-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em;
+                     text-transform:uppercase; color:var(--muted); }
+  .statusbar form { display:inline; }
+  .statusbar button { font-family:var(--sans); font-size:13px; padding:6px 12px; min-height:34px;
+                      background:transparent; color:var(--muted); border:1px solid var(--line);
+                      border-radius:3px; cursor:pointer; }
+  @media (hover:hover) { .statusbar button:hover { color:var(--ink); border-color:var(--ink); } }
+  .statusbar button:active { transform:translateY(1px); }
+
   /* ---- sign out ---- */
   .signout button { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
                     padding:7px 12px; background:transparent; color:var(--muted);
@@ -204,16 +241,46 @@ function fact(label, value) {
   return `<dt>${escapeHtml(label)}</dt><dd${text ? "" : ' class="dim"'}>${escapeHtml(text || "Not given")}</dd>`;
 }
 
-function leadCard(lead) {
+/** The next sensible states from where a lead is now — shown as one-tap buttons. */
+function nextStatuses(current) {
+  const flow = {
+    new: ["contacted", "lost"],
+    contacted: ["in_progress", "completed", "lost"],
+    in_progress: ["completed", "lost"],
+    completed: ["in_progress"],
+    lost: ["contacted"],
+  };
+  return flow[current] ?? ["contacted", "lost"];
+}
+
+function leadCard(lead, query) {
   const urgent = Boolean(lead.emergency);
   const raw = String(lead.callerNumber ?? "");
   const digits = dialable(raw);
+  const status = isValidStatus(lead.status) ? lead.status : "new";
+
+  // Round-trips the current filters so acting on a lead doesn't dump the
+  // owner back to an unfiltered list.
+  const back = new URLSearchParams(query ?? {}).toString();
+
+  const statusButtons = nextStatuses(status)
+    .map(
+      (next) => `
+      <form method="POST" action="/leads/status">
+        <input type="hidden" name="id" value="${escapeHtml(lead.id)}">
+        <input type="hidden" name="status" value="${escapeHtml(next)}">
+        <input type="hidden" name="back" value="${escapeHtml(back)}">
+        <button type="submit">${escapeHtml(STATUS_LABELS[next])}</button>
+      </form>`
+    )
+    .join("");
 
   return `
-    <article class="lead${urgent ? " urgent" : ""}">
+    <article class="lead${urgent ? " urgent" : ""} s-${escapeHtml(status)}">
       <div class="lead-head">
         <h2>${escapeHtml(lead.name || "Unknown caller")}</h2>
         ${urgent ? '<span class="badge">URGENT</span>' : ""}
+        <span class="status status-${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status])}</span>
       </div>
       <div class="when">${escapeHtml(formatWhen(lead.createdAt))}</div>
       <dl class="facts">
@@ -225,23 +292,84 @@ function leadCard(lead) {
         <a class="btn primary" href="tel:${escapeHtml(digits)}">Call <span class="num">${escapeHtml(raw)}</span></a>
         ${digits ? `<a class="btn" href="https://wa.me/${escapeHtml(digits)}">WhatsApp</a>` : ""}
       </div>
+      <div class="statusbar">
+        <span class="statusbar-label">Mark</span>
+        ${statusButtons}
+      </div>
     </article>`;
 }
 
-export function dashboardPage(leads) {
+/** Case-insensitive match across the fields an owner would actually search by. */
+export function leadMatchesSearch(lead, term) {
+  if (!term) return true;
+  const needle = term.trim().toLowerCase();
+  if (!needle) return true;
+  return [lead.name, lead.area, lead.problem, lead.callerNumber, lead.summary]
+    .some((v) => String(v ?? "").toLowerCase().includes(needle));
+}
+
+export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
+  return leads.filter((lead) => {
+    if (!leadMatchesSearch(lead, q)) return false;
+    if (status && (lead.status ?? "new") !== status) return false;
+    if (urgency === "urgent" && !lead.emergency) return false;
+    if (urgency === "normal" && lead.emergency) return false;
+    return true;
+  });
+}
+
+function option(value, label, selected) {
+  return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+}
+
+export function dashboardPage(leads, query = {}) {
+  const { q = "", status = "", urgency = "" } = query;
+
   const sorted = [...leads].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+  const visible = filterLeads(sorted, { q, status, urgency });
+
   const urgentCount = sorted.filter((l) => l.emergency).length;
+  const filtering = Boolean(q || status || urgency);
 
   const tally = sorted.length
-    ? `<b>${sorted.length}</b> lead${sorted.length === 1 ? "" : "s"}${urgentCount ? ` &middot; <b>${urgentCount}</b> urgent` : ""}`
+    ? filtering
+      ? `<b>${visible.length}</b> of ${sorted.length} shown`
+      : `<b>${sorted.length}</b> lead${sorted.length === 1 ? "" : "s"}${urgentCount ? ` &middot; <b>${urgentCount}</b> urgent` : ""}`
     : "Nothing yet";
 
-  const body = sorted.length
-    ? sorted.map(leadCard).join("")
-    : `<div class="empty">
-         <div class="mark">&#9889;</div>
-         <p>No leads yet.<br>They appear here the moment a customer replies.</p>
-       </div>`;
+  const controls = sorted.length
+    ? `<form class="filters" method="GET" action="/leads">
+         <input type="search" name="q" value="${escapeHtml(q)}" placeholder="Search name, area, problem, number">
+         <div class="filter-row">
+           <select name="status">
+             ${option("", "All statuses", status)}
+             ${LEAD_STATUSES.map((s) => option(s, STATUS_LABELS[s], status)).join("")}
+           </select>
+           <select name="urgency">
+             ${option("", "All urgency", urgency)}
+             ${option("urgent", "Urgent only", urgency)}
+             ${option("normal", "Non-urgent", urgency)}
+           </select>
+           <button type="submit">Apply</button>
+           ${filtering ? `<a class="clear" href="/leads">Clear</a>` : ""}
+         </div>
+       </form>`
+    : "";
+
+  let body;
+  if (!sorted.length) {
+    body = `<div class="empty">
+              <div class="mark">&#9889;</div>
+              <p>No leads yet.<br>They appear here the moment a customer replies.</p>
+            </div>`;
+  } else if (!visible.length) {
+    body = `<div class="empty">
+              <div class="mark">&#8709;</div>
+              <p>No leads match that.<br><a href="/leads">Clear the filters</a></p>
+            </div>`;
+  } else {
+    body = visible.map((lead) => leadCard(lead, query)).join("");
+  }
 
   return page("Leads", `
     <div class="masthead">
@@ -251,5 +379,6 @@ export function dashboardPage(leads) {
       </div>
       <form class="signout" method="POST" action="/logout"><button type="submit">Sign out</button></form>
     </div>
+    ${controls}
     ${body}`);
 }

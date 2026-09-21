@@ -25,7 +25,7 @@ import { log, logError } from "./lib/logger.mjs";
 import { handleHealth } from "./routes/health.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
-import { handleLanding, handleDashboard, handleLogin, handleLogout } from "./routes/dashboard.mjs";
+import { handleLanding, handleDashboard, handleLeadStatus, handleLogin, handleLogout } from "./routes/dashboard.mjs";
 
 import templates from "./templates.json" with { type: "json" };
 
@@ -55,6 +55,9 @@ export function buildApp(config) {
     }
     if (ctx.method === "GET" && ctx.pathname === "/leads") {
       return handleDashboard(ctx, deps);
+    }
+    if (ctx.method === "POST" && ctx.pathname === "/leads/status") {
+      return handleLeadStatus(ctx, deps);
     }
     if (ctx.method === "POST" && ctx.pathname === "/login") {
       return handleLogin(ctx, deps);
@@ -102,7 +105,7 @@ function startServer(config, app) {
 
       // /webhook verifies a signature over the raw bytes, and the dashboard
       // forms post url-encoded rather than JSON — none of them want this guard.
-      const NON_JSON_POSTS = new Set(["/webhook", "/login", "/logout"]);
+      const NON_JSON_POSTS = new Set(["/webhook", "/login", "/logout", "/leads/status"]);
       if (req.method === "POST" && json === null && !NON_JSON_POSTS.has(ctx.pathname)) {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "malformed JSON body" }));
