@@ -1,5 +1,5 @@
 import { handleDashboard } from "../routes/dashboard.mjs";
-import { getDeps, sendResult } from "./_deps.mjs";
+import { getDeps, sendResult, ctxFromRequest } from "./_deps.mjs";
 import { logError } from "../lib/logger.mjs";
 
 export default async function handler(req, res) {
@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   try {
     const deps = getDeps();
-    const result = await handleDashboard({ headers: req.headers }, deps);
+    const result = await handleDashboard(ctxFromRequest(req), deps);
     return sendResult(res, result);
   } catch (err) {
     logError("dashboard_handler_error", err, {});

@@ -29,6 +29,25 @@ export function getDeps() {
 }
 
 /**
+ * Builds the ctx routes/ expect from a Vercel request.
+ *
+ * server.mjs builds the same shape for local runs. Constructing it here
+ * rather than inline in each api/ wrapper keeps the two environments in
+ * step — a wrapper that quietly omitted `query` made every dashboard
+ * filter a no-op in production while passing locally.
+ */
+export function ctxFromRequest(req, rawBody = Buffer.alloc(0)) {
+  const url = new URL(req.url ?? "/", `http://${req.headers?.host ?? "localhost"}`);
+  return {
+    method: req.method,
+    pathname: url.pathname,
+    query: url.searchParams,
+    headers: req.headers ?? {},
+    rawBody,
+  };
+}
+
+/**
  * Writes a route result ({ status, html?, rawText?, body?, headers? }) out
  * to a Vercel response, so every api/ wrapper handles HTML pages,
  * redirects and JSON the same way.
