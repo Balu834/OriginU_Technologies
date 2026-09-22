@@ -81,6 +81,23 @@ export function handleWebhookPost(ctx, deps) {
               MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp }
           : config;
 
+        // Delivery receipts for messages we sent. These say what actually
+        // happened to a message, as opposed to the API having accepted it.
+        for (const status of change.value?.statuses ?? []) {
+          try {
+            const stored = await tenantStore.findMessageByProviderId?.(status.id);
+            if (!stored) continue;
+            await tenantStore.updateMessage({
+              ...stored,
+              deliveryStatus: status.status,
+              metadata: { ...stored.metadata, statusAt: new Date().toISOString() },
+            });
+            log("delivery_status_recorded", { status: status.status });
+          } catch (err) {
+            logError("delivery_status_error", err, {});
+          }
+        }
+
         for (const msg of change.value?.messages ?? []) {
           try {
             if (!msg.id) {
@@ -102,7 +119,7 @@ export function handleWebhookPost(ctx, deps) {
             log("customer_reply_received", { from, businessId: business?.id });
 
             const result = await handleInboundMessage(
-              { from, text: msg.text.body },
+              { from, text: msg.text.body, messageId: msg.id, messageType: msg.type, timestamp: msg.timestamp },
               { store: tenantStore, wa, config: tenantConfig, templates }
             );
             if (result.emergency) log("emergency_detected", { from });

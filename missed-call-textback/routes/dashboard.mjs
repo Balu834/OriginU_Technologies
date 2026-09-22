@@ -1,5 +1,5 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
-import { loginPage, dashboardPage } from "../lib/views.mjs";
+import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
 import { isValidStatus } from "../lib/leads.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { landingPage } from "../lib/landing.mjs";
@@ -42,6 +42,31 @@ function tenantStoreFor(session, store, businesses) {
   const business = businesses.byId(session?.businessId ?? "default");
   if (!business) throw new Error("session is not bound to a known business");
   return scopedToBusiness(store, business.id);
+}
+
+/**
+ * GET /lead?id=… — one lead with its full transcript.
+ *
+ * The lead is fetched through the session's tenant-scoped store, so an id
+ * belonging to another business simply doesn't resolve — there is no
+ * separate ownership check to forget.
+ */
+export async function handleLeadDetail(ctx, { store, config, businesses }) {
+  if (!config.DASHBOARD_PASSWORD_HASH) {
+    return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
+  }
+  const session = await currentSession(ctx, store);
+  if (!session) return { status: 200, html: loginPage() };
+
+  const tenantStore = tenantStoreFor(session, store, businesses);
+  const id = ctx.query?.get("id") ?? "";
+  const lead = await tenantStore.getLead(id);
+  if (!lead) return { status: 404, html: dashboardPage(await tenantStore.listLeads(), {}) };
+
+  // Older leads predate transcript storage; an empty list renders a plain
+  // note rather than inventing history that was never recorded.
+  const messages = tenantStore.listMessages ? await tenantStore.listMessages(lead.callerNumber) : [];
+  return { status: 200, html: leadDetailPage(lead, messages) };
 }
 
 /**

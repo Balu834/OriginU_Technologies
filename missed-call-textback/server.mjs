@@ -26,7 +26,7 @@ import { log, logError } from "./lib/logger.mjs";
 import { handleHealth } from "./routes/health.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
-import { handleLanding, handleDashboard, handleLeadStatus, handleLogin, handleLogout } from "./routes/dashboard.mjs";
+import { handleLanding, handleDashboard, handleLeadDetail, handleLeadStatus, handleLogin, handleLogout } from "./routes/dashboard.mjs";
 
 import templates from "./templates.json" with { type: "json" };
 
@@ -57,6 +57,9 @@ export function buildApp(config) {
     }
     if (ctx.method === "GET" && ctx.pathname === "/leads") {
       return handleDashboard(ctx, deps);
+    }
+    if (ctx.method === "GET" && ctx.pathname === "/lead") {
+      return handleLeadDetail(ctx, deps);
     }
     if (ctx.method === "POST" && ctx.pathname === "/leads/status") {
       return handleLeadStatus(ctx, deps);

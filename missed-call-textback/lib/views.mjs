@@ -177,6 +177,26 @@ const STYLES = `
   @media (hover:hover) { .statusbar button:hover { color:var(--ink); border-color:var(--ink); } }
   .statusbar button:active { transform:translateY(1px); }
 
+  /* ---- transcript ---- */
+  h2 { font-family:var(--display); font-size:20px; margin:26px 0 4px; font-weight:600; letter-spacing:-.01em; }
+  .note { font-size:13px; color:var(--muted); margin:0 0 12px; }
+  .backlink { font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+              color:var(--muted); text-decoration:none; white-space:nowrap; }
+  @media (hover:hover) { .backlink:hover { color:var(--ink); } }
+  .transcript { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+  .bubble { max-width:80%; padding:9px 13px; border-radius:13px; font-size:15px; line-height:1.45; }
+  .bubble.in  { align-self:flex-start; background:var(--card); border:1px solid var(--line);
+                border-bottom-left-radius:3px; }
+  .bubble.out { align-self:flex-end; background:color-mix(in srgb, var(--accent) 88%, #000);
+                color:var(--accent-ink); border-bottom-right-radius:3px; }
+  .bubble-text { white-space:pre-wrap; word-break:break-word; }
+  .bubble-meta { font-family:var(--mono); font-size:10px; letter-spacing:.06em; opacity:.7; margin-top:4px; }
+  .owner-alerts { margin-top:8px; }
+  .alert-row { display:flex; justify-content:space-between; gap:12px; padding:9px 12px; font-size:13px;
+               background:var(--card); border:1px solid var(--line); border-radius:3px; margin-bottom:6px; }
+  .alert-when, .alert-status { font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .leadlink { text-decoration:none; color:inherit; display:block; }
+
   /* ---- sign out ---- */
   .signout button { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
                     padding:7px 12px; background:transparent; color:var(--muted);
@@ -281,7 +301,7 @@ function leadCard(lead, query) {
   return `
     <article class="lead${urgent ? " urgent" : ""} s-${escapeHtml(status)}">
       <div class="lead-head">
-        <h2>${escapeHtml(lead.name || "Unknown caller")}</h2>
+        <h2><a class="leadlink" href="/lead?id=${encodeURIComponent(lead.id)}">${escapeHtml(lead.name || "Unknown caller")}</a></h2>
         ${urgent ? '<span class="badge">URGENT</span>' : ""}
         <span class="status status-${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status])}</span>
       </div>
@@ -322,6 +342,91 @@ export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
     if (urgency === "normal" && lead.emergency) return false;
     return true;
   });
+}
+
+/**
+ * Lead detail with the full WhatsApp transcript.
+ *
+ * Owner notifications are shown in a separate section, never inline with
+ * the customer exchange — they were sent to the business, not to the
+ * customer, and mixing them would misrepresent what the customer saw.
+ */
+export function leadDetailPage(lead, messages = []) {
+  const raw = String(lead.callerNumber ?? "");
+  const digits = dialable(raw);
+  const urgent = Boolean(lead.emergency);
+  const status = isValidStatus(lead.status) ? lead.status : "new";
+
+  const conversation = messages.filter((m) => m.senderType === "customer" || m.senderType === "assistant");
+  const ownerAlerts = messages.filter((m) => m.senderType === "owner");
+
+  const bubble = (m) => {
+    const mine = m.senderType === "assistant";
+    const when = m.timestamp ? formatWhen(m.timestamp) : "";
+    const status = m.deliveryStatus ? ` &middot; ${escapeHtml(m.deliveryStatus)}` : "";
+    const body = m.messageType === "text"
+      ? escapeHtml(m.text)
+      : `<em>[${escapeHtml(m.messageType)} message]</em>`;
+    return `<div class="bubble ${mine ? "out" : "in"}">
+              <div class="bubble-text">${body}</div>
+              <div class="bubble-meta">${escapeHtml(when)}${mine ? status : ""}</div>
+            </div>`;
+  };
+
+  const transcript = conversation.length
+    ? `<div class="transcript">${conversation.map(bubble).join("")}</div>`
+    : `<div class="empty">
+         <p>No transcript stored for this lead.<br>
+            It was captured before message history was recorded.</p>
+       </div>`;
+
+  const alerts = ownerAlerts.length
+    ? `<section class="owner-alerts">
+         <h2>Owner alerts</h2>
+         <p class="note">Sent to the business, not to the customer.</p>
+         ${ownerAlerts.map((m) => `
+           <div class="alert-row">
+             <span class="alert-when">${escapeHtml(m.timestamp ? formatWhen(m.timestamp) : "")}</span>
+             <span class="alert-status">${escapeHtml(m.deliveryStatus ?? (m.metadata?.accepted === false ? "failed" : "no receipt"))}</span>
+           </div>`).join("")}
+       </section>`
+    : "";
+
+  return page(`${lead.name || "Lead"}`, `
+    <div class="masthead">
+      <div>
+        <h1>${escapeHtml(lead.name || "Unknown caller")}</h1>
+        <div class="tally">${escapeHtml(formatWhen(lead.createdAt))}</div>
+      </div>
+      <a class="backlink" href="/leads">All leads</a>
+    </div>
+
+    <article class="lead${urgent ? " urgent" : ""}">
+      <div class="lead-head">
+        ${urgent ? '<span class="badge">URGENT</span>' : ""}
+        <span class="status status-${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status])}</span>
+      </div>
+      ${lead.ownerNotified === false
+        ? `<p class="undelivered">WhatsApp alert for this lead failed to send — it only exists here.</p>`
+        : ""}
+      <dl class="facts">
+        ${fact("Phone", raw)}
+        ${fact("Problem", lead.problem)}
+        ${fact("Area", lead.area)}
+        ${fact("Urgency", lead.urgency)}
+        ${fact("Summary", lead.summary)}
+      </dl>
+      <div class="actions">
+        <a class="btn primary" href="tel:${escapeHtml(digits)}">Call</a>
+        ${digits ? `<a class="btn" href="https://wa.me/${escapeHtml(digits)}">WhatsApp</a>` : ""}
+      </div>
+    </article>
+
+    <section>
+      <h2>Conversation</h2>
+      ${transcript}
+    </section>
+    ${alerts}`);
 }
 
 function option(value, label, selected) {

@@ -20,18 +20,31 @@ export const TEST_CONFIG = {
   DEMO_MODE: false,
 };
 
-/** Records every outbound message instead of hitting the network. */
+/**
+ * Records every outbound message instead of hitting the network.
+ *
+ * The response shape mirrors the real Graph API, including the wamid in
+ * body.messages[0].id — transcript and delivery-status code reads that,
+ * and a double returning an empty body would hide those paths.
+ */
 export function createFakeWa() {
   const sent = [];
+  let counter = 0;
+  const accepted = () => ({
+    ok: true,
+    status: 200,
+    body: { messaging_product: "whatsapp", messages: [{ id: `wamid.FAKE${++counter}` }] },
+  });
+
   return {
     sent,
     sendTemplate(to, templateName, languageCode, bodyParams = {}) {
       sent.push({ kind: "template", to, templateName, languageCode, bodyParams });
-      return Promise.resolve({ ok: true, status: 200, body: {} });
+      return Promise.resolve(accepted());
     },
     sendText(to, body) {
       sent.push({ kind: "text", to, body });
-      return Promise.resolve({ ok: true, status: 200, body: {} });
+      return Promise.resolve(accepted());
     },
   };
 }

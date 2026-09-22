@@ -9,6 +9,7 @@ import { isEmergency } from "./emergency.mjs";
 import { extractFields, applyAwaitingFallback, nextMissingField } from "./extract.mjs";
 import { createLead, formatOwnerNotification } from "./leads.mjs";
 import { logError } from "./logger.mjs";
+import { createMessage, providerMessageId } from "./messages.mjs";
 
 const QUESTION_KEY = { problem: "ask_problem", area: "ask_area", name: "ask_name", urgency: "ask_urgency" };
 
@@ -34,7 +35,51 @@ function freshConversation(callerNumber) {
  * Handles one inbound WhatsApp text message. Mutates nothing outside the
  * store; returns a summary of what happened for logging/tests.
  */
-export async function handleInboundMessage({ from, text }, { store, wa, config, templates }) {
+export async function handleInboundMessage(
+  { from, text, messageId = null, messageType = "text", timestamp = null },
+  { store, wa, config, templates }
+) {
+  /** Records one outbound message alongside sending it, capturing Meta's id. */
+  const sendAndRecord = async (to, body, senderType, leadId = null) => {
+    const result = await wa.sendText(to, body);
+    if (store.saveMessage) {
+      await store.saveMessage(
+        createMessage({
+          conversationId: from,
+          leadId,
+          direction: "outbound",
+          senderType,
+          customerPhone: from,
+          messageId: providerMessageId(result),
+          text: body,
+          // Acceptance by the API is not delivery; that only arrives later
+          // via a status webhook, so this stays null until it does.
+          deliveryStatus: null,
+          metadata: { accepted: result?.ok !== false, to },
+        })
+      );
+    }
+    return result;
+  };
+
+  // Record what the customer said before anything else can fail — the
+  // transcript is the record of record, and losing it to a downstream
+  // error would defeat the point of keeping one.
+  if (store.saveMessage) {
+    await store.saveMessage(
+      createMessage({
+        conversationId: from,
+        direction: "inbound",
+        senderType: "customer",
+        customerPhone: from,
+        messageId,
+        messageType,
+        text,
+        timestamp,
+      })
+    );
+  }
+
   const existing = await store.getConversation(from);
   // A reply after the lead is already complete is a new job, not more
   // detail for the old one — start clean rather than re-completing (and
@@ -50,12 +95,12 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
   if (isEmergency(text) && !conversation.emergency) {
     conversation.emergency = true;
     result.emergency = true;
-    await wa.sendText(from, fillTemplate(templates._conversation.emergency_safety, [config.OWNER_NAME]));
+    await sendAndRecord(from, fillTemplate(templates._conversation.emergency_safety, [config.OWNER_NAME]), "assistant");
 
     if (!conversation.emergencyNotified) {
       conversation.emergencyNotified = true;
       const partialLead = createLead({ callerNumber: from, fields: conversation.fields, emergency: true });
-      await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead));
+      await sendAndRecord(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead), "owner", partialLead.id);
     }
     // Fall through into the normal ask/complete flow below — the customer
     // still gets asked whatever's missing (or gets the confirmation, if
@@ -90,14 +135,18 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
 
   // Everything below is best-effort delivery. State is already durable.
   if (lead) {
-    await wa.sendText(
+    await sendAndRecord(
       from,
-      fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME])
+      fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME]),
+      "assistant",
+      lead.id
     );
 
     // Always notify on completion, even after an earlier emergency alert —
     // that alert carried none of the name/area/problem detail this one does.
-    const notified = await wa.sendText(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead));
+    const notified = await sendAndRecord(
+      config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead), "owner", lead.id
+    );
 
     // A lead the owner never hears about is the one failure that destroys
     // this product's whole value, so record it rather than letting it pass
@@ -110,7 +159,7 @@ export async function handleInboundMessage({ from, text }, { store, wa, config, 
     result.ownerNotified = ownerNotified;
   } else {
     const question = templates._conversation[QUESTION_KEY[missing]];
-    await wa.sendText(from, fillTemplate(question, [conversation.fields.name || ""]));
+    await sendAndRecord(from, fillTemplate(question, [conversation.fields.name || ""]), "assistant");
   }
 
   return result;

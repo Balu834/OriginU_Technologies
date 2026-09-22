@@ -19,6 +19,9 @@ const EMPTY = () => ({
   processedMissedCalls: {},
   sessions: {},
   rateLimits: {},
+  messages: {},
+  messageIndex: {},
+  providerIndex: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -72,6 +75,28 @@ export function createStore(filePath) {
       return Object.entries(data.leads)
         .filter(([key]) => key.startsWith(ns) && (ns || !key.startsWith("b:")))
         .map(([, lead]) => lead);
+    },
+
+    // Transcript storage — mirrors lib/store.redis.mjs exactly, so tests
+    // against this backend prove the same behaviour as production.
+    async saveMessage(message, ns = "") {
+      data.messages[`${ns}${message.id}`] = message;
+      const listKey = `${ns}${message.conversationId}`;
+      (data.messageIndex[listKey] ??= []).push(message.id);
+      if (message.messageId) data.providerIndex[`${ns}${message.messageId}`] = message.id;
+      persist();
+    },
+    async listMessages(conversationId, ns = "") {
+      const ids = data.messageIndex[`${ns}${conversationId}`] ?? [];
+      return ids.map((id) => data.messages[`${ns}${id}`]).filter(Boolean);
+    },
+    async findMessageByProviderId(providerMessageId, ns = "") {
+      const ourId = data.providerIndex[`${ns}${providerMessageId}`];
+      return ourId ? (data.messages[`${ns}${ourId}`] ?? null) : null;
+    },
+    async updateMessage(message, ns = "") {
+      data.messages[`${ns}${message.id}`] = message;
+      persist();
     },
 
     async hasProcessedMessage(id) {

@@ -1,0 +1,14 @@
+import { handleLeadDetail } from "../routes/dashboard.mjs";
+import { getDeps, sendResult, ctxFromRequest } from "./_deps.mjs";
+import { logError } from "../lib/logger.mjs";
+
+export default async function handler(req, res) {
+  if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
+  try {
+    const result = await handleLeadDetail(ctxFromRequest(req), getDeps());
+    return sendResult(res, result);
+  } catch (err) {
+    logError("lead_detail_handler_error", err, {});
+    return res.status(500).json({ error: "internal error" });
+  }
+}

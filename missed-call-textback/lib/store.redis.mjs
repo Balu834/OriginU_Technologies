@@ -38,6 +38,10 @@ export function scopedToBusiness(store, businessId) {
     listLeads: () => store.listLeads(ns),
     hasProcessedMessage: (id) => store.hasProcessedMessage(ns + id),
     markMessageProcessed: (id) => store.markMessageProcessed(ns + id),
+    saveMessage: (m) => store.saveMessage({ ...m, businessId }, ns),
+    listMessages: (cid) => store.listMessages(cid, ns),
+    findMessageByProviderId: (pid) => store.findMessageByProviderId(pid, ns),
+    updateMessage: (m) => store.updateMessage(m, ns),
     lastMissedCallAt: (n) => store.lastMissedCallAt(ns + n),
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
@@ -91,6 +95,36 @@ export function createRedisStore(env = process.env) {
       if (!ids.length) return [];
       const raws = await command("MGET", ...ids.map((id) => `lead:${ns}${id}`));
       return raws.filter(Boolean).map((r) => JSON.parse(r));
+    },
+
+    /**
+     * Transcript storage. Messages live in a per-conversation list so
+     * ordering is insertion order — the order they actually happened —
+     * rather than something reconstructed from timestamps that may tie.
+     * `msgid:` is a lookup index from Meta's wamid back to our record, so
+     * a later status webhook can find the message it refers to.
+     */
+    async saveMessage(message, ns = "") {
+      await command("SET", `msg:${ns}${message.id}`, JSON.stringify(message));
+      await command("RPUSH", `${ns}messages:${message.conversationId}`, message.id);
+      if (message.messageId) {
+        await command("SET", `${ns}msgid:${message.messageId}`, message.id);
+      }
+    },
+    async listMessages(conversationId, ns = "") {
+      const ids = (await command("LRANGE", `${ns}messages:${conversationId}`, "0", "-1")) ?? [];
+      if (!ids.length) return [];
+      const raws = await command("MGET", ...ids.map((id) => `msg:${ns}${id}`));
+      return raws.filter(Boolean).map((r) => JSON.parse(r));
+    },
+    async findMessageByProviderId(providerMessageId, ns = "") {
+      const ourId = await command("GET", `${ns}msgid:${providerMessageId}`);
+      if (!ourId) return null;
+      const raw = await command("GET", `msg:${ns}${ourId}`);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async updateMessage(message, ns = "") {
+      await command("SET", `msg:${ns}${message.id}`, JSON.stringify(message));
     },
 
     async hasProcessedMessage(id) {
