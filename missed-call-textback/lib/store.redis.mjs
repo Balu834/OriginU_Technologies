@@ -57,6 +57,7 @@ export function scopedToBusiness(store, businessId) {
     getIntegration: store.getIntegration?.bind(store),
     getIntegrationByBusiness: store.getIntegrationByBusiness?.bind(store),
     getIntegrationByPhoneNumberId: store.getIntegrationByPhoneNumberId?.bind(store),
+    releasePhoneNumberMapping: store.releasePhoneNumberMapping?.bind(store),
     saveBusiness: store.saveBusiness,
     getBusiness: store.getBusiness,
     listBusinesses: store.listBusinesses,
@@ -168,6 +169,23 @@ export function createRedisStore(env = process.env) {
       await command('SET', 'integration:business:' + integration.businessId, integration.id);
       await command('SET', 'integration:phone:' + integration.phoneNumberId, integration.id);
       await command('SADD', 'integrations:index', integration.id);
+    },
+
+    /**
+     * Drops a phone-number mapping, but only if it still points at the
+     * integration that is giving it up.
+     *
+     * The compare-and-delete is the whole point: an unconditional delete
+     * of `integration:phone:<n>` would let one business release a number
+     * that now belongs to another. Done as a Lua script so the check and
+     * the delete are one atomic step — a read-then-delete could still
+     * remove a mapping that changed owner in between.
+     */
+    async releasePhoneNumberMapping(phoneNumberId, integrationId) {
+      if (!phoneNumberId || !integrationId) return false;
+      const script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+      const deleted = await command('EVAL', script, '1', 'integration:phone:' + phoneNumberId, integrationId);
+      return Number(deleted) === 1;
     },
     async getIntegration(id) {
       const raw = await command('GET', 'integration:' + id);

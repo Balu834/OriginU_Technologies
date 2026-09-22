@@ -771,6 +771,130 @@ test("a tenant cannot add itself to, or read, another tenant's team", async () =
   assert.ok(!teamView.includes("owner-b@example.test"), "tenant B's owner appeared in tenant A's team page");
 });
 
+// ============================== 9b. PHONE NUMBER MAPPING LIFECYCLE
+
+test("replacing a number releases the old mapping and keeps the new one", async () => {
+  const w = await buildWorld();
+  const before = await w.integrations.forBusiness(w.bizA.id);
+
+  await w.integrations.register({
+    businessId: w.bizA.id, phoneNumberId: "TEST_PHONE_A_NEW", accessToken: "FAKE-ACCESS-TOKEN-ALPHA-NEW",
+  });
+
+  // The new number routes to A...
+  const byNew = await w.integrations.byPhoneNumberId("TEST_PHONE_A_NEW");
+  assert.equal(byNew.businessId, w.bizA.id);
+
+  // ...and the old one routes nowhere at all.
+  assert.equal(await w.integrations.byPhoneNumberId(TEST_PHONE_A), null,
+    "the superseded number still resolved to a business");
+
+  // The integration is replaced, not duplicated: same id, same creation date.
+  const after = await w.integrations.forBusiness(w.bizA.id);
+  assert.equal(after.id, before.id, "re-registering created a second integration record");
+  assert.equal(after.createdAt, before.createdAt);
+  assert.equal(after.phoneNumberId, "TEST_PHONE_A_NEW");
+  assert.equal(w.integrations.secretsOf(after).accessToken, "FAKE-ACCESS-TOKEN-ALPHA-NEW");
+});
+
+test("a released number becomes available to another business", async () => {
+  const w = await buildWorld();
+
+  // A gives up TEST_PHONE_A.
+  await w.integrations.register({ businessId: w.bizA.id, phoneNumberId: "TEST_PHONE_A_NEW", accessToken: "FAKE-A-NEW" });
+
+  // B may now claim it — under the old behaviour this threw, because the
+  // abandoned mapping still held the number.
+  await w.integrations.register({ businessId: w.bizB.id, phoneNumberId: TEST_PHONE_A, accessToken: TOKEN_B });
+
+  const routed = await w.integrations.byPhoneNumberId(TEST_PHONE_A);
+  assert.equal(routed.businessId, w.bizB.id, "the released number did not transfer to its new owner");
+
+  // And A is unaffected on its current number.
+  assert.equal((await w.integrations.byPhoneNumberId("TEST_PHONE_A_NEW")).businessId, w.bizA.id);
+});
+
+test("releasing a number cannot remove another business's mapping", async () => {
+  const w = await buildWorld();
+  const intA = await w.integrations.forBusiness(w.bizA.id);
+  const intB = await w.integrations.forBusiness(w.bizB.id);
+
+  // A's integration id, aimed at B's number: the compare fails, nothing happens.
+  const released = await w.store.releasePhoneNumberMapping(TEST_PHONE_B, intA.id);
+  assert.equal(released, false);
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_B)).businessId, w.bizB.id,
+    "one business released another's phone number mapping");
+
+  // A plausible-looking but wrong id is equally powerless.
+  assert.equal(await w.store.releasePhoneNumberMapping(TEST_PHONE_B, crypto.randomUUID()), false);
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_B)).id, intB.id);
+
+  // Only the holder can release it.
+  assert.equal(await w.store.releasePhoneNumberMapping(TEST_PHONE_B, intB.id), true);
+  assert.equal(await w.integrations.byPhoneNumberId(TEST_PHONE_B), null);
+});
+
+test("re-registering the same number for the same business keeps it mapped", async () => {
+  const w = await buildWorld();
+  const before = await w.integrations.forBusiness(w.bizA.id);
+
+  // Rotating only the token, number unchanged — the mapping must survive.
+  await w.integrations.register({ businessId: w.bizA.id, phoneNumberId: TEST_PHONE_A, accessToken: "FAKE-ROTATED-SAME-NUMBER" });
+
+  const routed = await w.integrations.byPhoneNumberId(TEST_PHONE_A);
+  assert.ok(routed, "rotating the token unmapped the business's own number");
+  assert.equal(routed.businessId, w.bizA.id);
+  assert.equal(routed.id, before.id);
+  assert.equal(w.integrations.secretsOf(routed).accessToken, "FAKE-ROTATED-SAME-NUMBER");
+});
+
+test("a replaced number still cannot be claimed while its owner holds it", async () => {
+  const w = await buildWorld();
+  await assert.rejects(
+    () => w.integrations.register({ businessId: w.bizA.id, phoneNumberId: TEST_PHONE_B, accessToken: "FAKE-STOLEN" }),
+    /already registered to another business/
+  );
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_B)).businessId, w.bizB.id);
+  // The refusal left A's own mapping alone.
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_A)).businessId, w.bizA.id);
+});
+
+test("a number swap between two businesses ends with exactly one owner each", async () => {
+  const w = await buildWorld();
+
+  // A moves off its number; B takes it; A takes a third.
+  await w.integrations.register({ businessId: w.bizA.id, phoneNumberId: "TEST_PHONE_A_THIRD", accessToken: "FAKE-A3" });
+  await w.integrations.register({ businessId: w.bizB.id, phoneNumberId: TEST_PHONE_A, accessToken: TOKEN_B });
+
+  const mappings = {
+    [TEST_PHONE_A]: (await w.integrations.byPhoneNumberId(TEST_PHONE_A))?.businessId ?? null,
+    [TEST_PHONE_B]: (await w.integrations.byPhoneNumberId(TEST_PHONE_B))?.businessId ?? null,
+    TEST_PHONE_A_THIRD: (await w.integrations.byPhoneNumberId("TEST_PHONE_A_THIRD"))?.businessId ?? null,
+  };
+  assert.deepEqual(mappings, {
+    [TEST_PHONE_A]: w.bizB.id,
+    [TEST_PHONE_B]: null,          // B released it when it moved
+    TEST_PHONE_A_THIRD: w.bizA.id,
+  });
+
+  // One integration per business, still.
+  assert.equal((await w.integrations.forBusiness(w.bizA.id)).phoneNumberId, "TEST_PHONE_A_THIRD");
+  assert.equal((await w.integrations.forBusiness(w.bizB.id)).phoneNumberId, TEST_PHONE_A);
+});
+
+test("the default business's stored mapping survives a rotation", async () => {
+  const w = await buildWorld();
+  // The live tenant resolves through the env fallback in tests; registering
+  // a stored integration for it must not disturb its number.
+  await w.integrations.register({
+    businessId: "default", phoneNumberId: TEST_CONFIG.META_PHONE_NUMBER_ID, accessToken: "FAKE-DEFAULT-STORED",
+  });
+  const routed = await w.integrations.byPhoneNumberId(TEST_CONFIG.META_PHONE_NUMBER_ID);
+  assert.equal(routed.businessId, "default");
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_A)).businessId, w.bizA.id);
+  assert.equal((await w.integrations.byPhoneNumberId(TEST_PHONE_B)).businessId, w.bizB.id);
+});
+
 // ================================================= 10. ROLE AUTHORIZATION
 
 async function withRole(w, role, email) {

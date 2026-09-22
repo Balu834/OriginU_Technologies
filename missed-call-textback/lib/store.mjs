@@ -134,6 +134,14 @@ export function createStore(filePath) {
       const id = data.integrationByPhone[phoneNumberId];
       return id ? (data.integrations[id] ?? null) : null;
     },
+    /** Mirrors the Redis compare-and-delete: only the holder may release a number. */
+    async releasePhoneNumberMapping(phoneNumberId, integrationId) {
+      if (!phoneNumberId || !integrationId) return false;
+      if (data.integrationByPhone[phoneNumberId] !== integrationId) return false;
+      delete data.integrationByPhone[phoneNumberId];
+      persist();
+      return true;
+    },
 
     async saveUser(user) {
       data.users[user.id] = user;

@@ -142,16 +142,51 @@ export function createIntegrationService(store, config) {
 
     secretsOf,
 
-    /** Registers an integration, refusing a phone number another business already claims. */
+    /**
+     * Registers an integration, refusing a phone number another business
+     * already claims.
+     *
+     * A business has at most one integration, so re-registering REPLACES
+     * it in place rather than inserting a second record. That matters for
+     * more than tidiness: the previous version created a fresh row each
+     * time, which left the old `integration:phone:<old>` mapping pointing
+     * at an abandoned record. The stale mapping meant a number this
+     * business no longer used stayed permanently claimed — no other
+     * business could ever register it — and an inbound event on it still
+     * resolved to a live tenant.
+     *
+     * The superseded number is released only after the new mapping is
+     * written, so a failure mid-way leaves the business reachable on its
+     * old number rather than on none at all.
+     */
     async register(input) {
-      const existing = await store.getIntegrationByPhoneNumberId?.(String(input.phoneNumberId));
-      if (existing && existing.businessId !== input.businessId) {
+      const phoneNumberId = String(input.phoneNumberId ?? "");
+      const claimant = await store.getIntegrationByPhoneNumberId?.(phoneNumberId);
+      if (claimant && claimant.businessId !== input.businessId) {
         throw new Error(
           `phone_number_id ${maskIdentifier(input.phoneNumberId)} is already registered to another business`
         );
       }
+
+      const previous = await store.getIntegrationByBusiness?.(input.businessId);
       const integration = createIntegration({ ...input, encryptionKey: key });
+
+      // Keep the business's integration identity stable across changes;
+      // only the credentials and the number move.
+      if (previous && !previous._legacy) {
+        integration.id = previous.id;
+        integration.createdAt = previous.createdAt;
+      }
+
       await store.saveIntegration(integration);
+
+      if (previous && !previous._legacy && previous.phoneNumberId && previous.phoneNumberId !== phoneNumberId) {
+        // Compare-and-delete: this can only drop a mapping that still
+        // points at THIS integration, so one business can never release
+        // another's number.
+        await store.releasePhoneNumberMapping?.(previous.phoneNumberId, previous.id);
+      }
+
       return integration;
     },
 
