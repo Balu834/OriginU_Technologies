@@ -170,6 +170,10 @@ export async function resolveActor(session, accounts) {
       : null;
   }
 
+  // Without an accounts service there is no membership to verify against,
+  // and an unverifiable user session must not be trusted.
+  if (!accounts) return null;
+
   const membership = await accounts.membershipFor(session.userId, session.businessId);
   if (!membership) return null;
   return { user: { id: session.userId }, businessId: membership.businessId, role: membership.role, legacy: false };

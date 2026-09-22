@@ -3,6 +3,8 @@ import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
 import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
 import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
+import { resolveActor } from "../lib/users.mjs";
+import { clientForBusiness } from "../lib/outbound.mjs";
 import { landingPage } from "../lib/landing.mjs";
 import { log } from "../lib/logger.mjs";
 
@@ -12,7 +14,8 @@ export function handleLanding(ctx, { config }) {
 }
 
 /** GET /leads — the leads dashboard, or the login form when there's no valid session. */
-export async function handleDashboard(ctx, { store, config, businesses }) {
+export async function handleDashboard(ctx, deps) {
+  const { store, config } = deps;
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
   }
@@ -28,21 +31,43 @@ export async function handleDashboard(ctx, { store, config, businesses }) {
   // Leads are read through a store scoped to the session's business, so
   // the dashboard cannot return another tenant's data even if a filter is
   // wrong — the keys simply aren't reachable.
-  const tenantStore = tenantStoreFor(session, store, businesses);
-  const leads = await tenantStore.listLeads();
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return noTenantResult(session);
+
+  const leads = await tenant.store.listLeads();
   return { status: 200, html: dashboardPage(leads, query) };
 }
 
 /**
- * Resolves the store a signed-in session is allowed to touch. The business
- * comes from the session record, never from the request, so a crafted
- * query string can't select someone else's tenant.
+ * Resolves the tenant a signed-in session is allowed to touch, or null.
+ *
+ * The business comes from the stored membership, never from the request,
+ * so a crafted query string can't select someone else's tenant — and
+ * never from a default, either. An earlier version fell back to the
+ * `default` business whenever the session named none, which meant anyone
+ * who signed up and had not yet created a business was handed the default
+ * tenant's leads. A session that does not resolve to a business gets
+ * nothing; "which tenant?" has no sensible default answer.
+ *
+ * Membership is re-read on every request rather than trusted from the
+ * session, so removing someone from a business ends their access now
+ * instead of whenever their cookie happens to expire.
  */
-function tenantStoreFor(session, store, businesses) {
-  if (!businesses) return store;
-  const business = businesses.byId(session?.businessId ?? "default");
-  if (!business) throw new Error("session is not bound to a known business");
-  return scopedToBusiness(store, business.id);
+async function tenantFor(session, { store, businesses, accounts }) {
+  const actor = await resolveActor(session, accounts);
+  if (!actor?.businessId) return null;
+
+  if (!businesses) return { actor, business: null, store };
+  const business = businesses.byId(actor.businessId);
+  if (!business) return null;
+  return { actor, business, store: scopedToBusiness(store, business.id) };
+}
+
+/** What a session that resolves to no tenant should be shown. */
+function noTenantResult(session) {
+  // Signed in but with no business yet: onboarding, not an error.
+  if (session?.userId) return { status: 302, headers: { Location: "/onboarding" }, body: {} };
+  return { status: 200, html: loginPage({ error: "That session is no longer valid. Please sign in again." }) };
 }
 
 /**
@@ -52,21 +77,24 @@ function tenantStoreFor(session, store, businesses) {
  * belonging to another business simply doesn't resolve — there is no
  * separate ownership check to forget.
  */
-export async function handleLeadDetail(ctx, { store, config, businesses }) {
+export async function handleLeadDetail(ctx, deps) {
+  const { store, config } = deps;
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
   }
   const session = await currentSession(ctx, store);
   if (!session) return { status: 200, html: loginPage() };
 
-  const tenantStore = tenantStoreFor(session, store, businesses);
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return noTenantResult(session);
+
   const id = ctx.query?.get("id") ?? "";
-  const lead = await tenantStore.getLead(id);
-  if (!lead) return { status: 404, html: dashboardPage(await tenantStore.listLeads(), {}) };
+  const lead = await tenant.store.getLead(id);
+  if (!lead) return { status: 404, html: dashboardPage(await tenant.store.listLeads(), {}) };
 
   // Older leads predate transcript storage; an empty list renders a plain
   // note rather than inventing history that was never recorded.
-  const messages = tenantStore.listMessages ? await tenantStore.listMessages(lead.callerNumber) : [];
+  const messages = tenant.store.listMessages ? await tenant.store.listMessages(lead.callerNumber) : [];
   return { status: 200, html: leadDetailPage(lead, messages) };
 }
 
@@ -77,13 +105,15 @@ export async function handleLeadDetail(ctx, { store, config, businesses }) {
  * against the known set rather than written through, so a crafted form
  * post can't put arbitrary values on a lead.
  */
-export async function handleLeadStatus(ctx, { store, businesses }) {
-  const session = await currentSession(ctx, store);
+export async function handleLeadStatus(ctx, deps) {
+  const session = await currentSession(ctx, deps.store);
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
 
   // Same scoping as the read path: a lead id from another tenant simply
   // doesn't resolve here, so it can't be mutated across the boundary.
-  const tenantStore = tenantStoreFor(session, store, businesses);
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return noTenantResult(session);
+  const tenantStore = tenant.store;
 
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
   const id = form.get("id") ?? "";
@@ -132,11 +162,13 @@ export async function handleLeadStatus(ctx, { store, businesses }) {
  * Separate from status on purpose: how fast this needs attention is a
  * different question from where it sits in the follow-up workflow.
  */
-export async function handleLeadPriority(ctx, { store, businesses }) {
-  const session = await currentSession(ctx, store);
+export async function handleLeadPriority(ctx, deps) {
+  const session = await currentSession(ctx, deps.store);
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
 
-  const tenantStore = tenantStoreFor(session, store, businesses);
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return noTenantResult(session);
+  const tenantStore = tenant.store;
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
   const id = form.get("id") ?? "";
   const priority = form.get("priority") ?? "";
@@ -169,11 +201,15 @@ export async function handleLeadPriority(ctx, { store, businesses }) {
  * dashboard keeps showing the lead as undelivered rather than quietly
  * claiming success.
  */
-export async function handleRetryNotification(ctx, { store, wa, config, businesses }) {
+export async function handleRetryNotification(ctx, deps) {
+  const { store, config } = deps;
   const session = await currentSession(ctx, store);
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
 
-  const tenantStore = tenantStoreFor(session, store, businesses);
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return noTenantResult(session);
+  const tenantStore = tenant.store;
+
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
   const id = form.get("id") ?? "";
 
@@ -183,10 +219,20 @@ export async function handleRetryNotification(ctx, { store, wa, config, business
     return { status: 302, headers: { Location: "/leads" }, body: {} };
   }
 
-  const business = businesses?.byId(session.businessId ?? "default");
+  const business = tenant.business;
   const destination = business?.ownerWhatsApp ?? config.MOHAMED_WHATSAPP_NUMBER;
 
-  const result = await wa.sendText(destination, formatOwnerNotification(lead));
+  // The retry goes out on this business's own integration. If it has none,
+  // nothing is sent: a notification delivered from another tenant's
+  // WhatsApp number is worse than one that visibly failed.
+  const client = await clientForBusiness(tenant.actor.businessId, deps);
+  if (!client) {
+    log("notification_retry_failed", { leadId: id, reason: "no integration for this business" });
+    await tenantStore.saveLead({ ...lead, ownerNotified: false, updatedAt: new Date().toISOString() });
+    return { status: 302, headers: { Location: `/lead?id=${encodeURIComponent(id)}` }, body: {} };
+  }
+
+  const result = await client.sendText(destination, formatOwnerNotification(lead));
   const ownerNotified = result?.ok !== false;
 
   if (tenantStore.saveMessage) {

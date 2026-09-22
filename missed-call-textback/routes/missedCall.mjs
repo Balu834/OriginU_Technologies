@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { isValidE164, normalizePhone } from "../lib/phone.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
+import { clientForBusiness } from "../lib/outbound.mjs";
 import { log } from "../lib/logger.mjs";
 
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000; // resending the template within 10 min of a missed call is treated as a duplicate/retry
@@ -22,7 +23,9 @@ function extractBearerToken(authHeader) {
  * POST /missed-call — called by the phone automation (MacroDroid/Tasker).
  * Auth: `Authorization: Bearer <MISSED_CALL_API_KEY>`.
  */
-export async function handleMissedCall(ctx, { config, store, wa, businesses }) {
+export async function handleMissedCall(ctx, deps) {
+  let { config, store } = deps;
+  const { wa, businesses } = deps;
   const token = extractBearerToken(ctx.headers.authorization);
 
   // The API key identifies which business the automation belongs to, so
@@ -70,7 +73,17 @@ export async function handleMissedCall(ctx, { config, store, wa, businesses }) {
 
   log("missed_call_received", { callerNumber: caller });
 
-  const sent = await wa.sendTemplate(caller, config.WHATSAPP_MISSED_CALL_TEMPLATE, config.WHATSAPP_TEMPLATE_LANGUAGE, {
+  // The template goes out on this business's own integration. Without one
+  // there is nothing legitimate to send with: falling back to the shared
+  // client would text this business's customer from a different
+  // business's WhatsApp number.
+  const client = business ? await clientForBusiness(business.id, deps) : wa;
+  if (!client) {
+    log("missed_call_no_integration", { businessId: business?.id });
+    return { status: 503, body: { sent: false, error: "this business has no WhatsApp integration configured" } };
+  }
+
+  const sent = await client.sendTemplate(caller, config.WHATSAPP_MISSED_CALL_TEMPLATE, config.WHATSAPP_TEMPLATE_LANGUAGE, {
     business_name: config.BUSINESS_NAME,
     owner_name: config.OWNER_NAME,
   });

@@ -1,4 +1,5 @@
-import { verifySignature, createWhatsAppClientFor } from "../lib/whatsapp.mjs";
+import { verifySignature } from "../lib/whatsapp.mjs";
+import { clientForBusiness, refusingClient } from "../lib/outbound.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
@@ -96,19 +97,17 @@ export function handleWebhookPost(ctx, deps) {
         const tenantStore = business ? scopedToBusiness(store, business.id) : store;
 
         // Replies go out on the credentials of the business the message
-        // arrived for — never a shared client. Without an integration
-        // there is nothing to send with, so the global client is used only
-        // where no integration layer is wired at all (tests, local runs).
-        let tenantWa = wa;
-        if (integration && integrations) {
-          const secrets = integrations.secretsOf(integration);
-          if (secrets?.accessToken) {
-            tenantWa = createWhatsAppClientFor({
-              phoneNumberId: integration.phoneNumberId,
-              accessToken: secrets.accessToken,
-            });
-          }
-        }
+        // arrived for — never a shared client. Resolved through the same
+        // helper the missed-call and retry paths use, so the three cannot
+        // drift apart again; two of them once reached for the global
+        // client and sent on the default tenant's number.
+        // A business we cannot send for gets a client that refuses rather
+        // than the shared one: the customer's message is still recorded and
+        // the lead still created, and the undelivered reply shows up on the
+        // dashboard instead of arriving from someone else's number.
+        const tenantWa = business
+          ? ((await clientForBusiness(business.id, deps)) ?? refusingClient(business.id, log))
+          : wa;
         const tenantConfig = business
           ? { ...config, BUSINESS_NAME: business.name, OWNER_NAME: business.ownerName,
               MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp }
