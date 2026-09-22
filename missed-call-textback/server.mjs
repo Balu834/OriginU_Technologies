@@ -23,11 +23,11 @@ import { createStore } from "./lib/store.mjs";
 import { createWhatsAppClient } from "./lib/whatsapp.mjs";
 import { loadBusinessRegistry } from "./lib/businesses.mjs";
 import { createIntegrationService } from "./lib/integrations.mjs";
+import { createAccountService } from "./lib/users.mjs";
 import { log, logError } from "./lib/logger.mjs";
-import { handleHealth } from "./routes/health.mjs";
+import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
-import { handleLanding, handleDashboard, handleLeadDetail, handleLeadStatus, handleLeadPriority, handleRetryNotification, handleLogin, handleLogout } from "./routes/dashboard.mjs";
 
 import templates from "./templates.json" with { type: "json" };
 
@@ -38,51 +38,18 @@ export function buildApp(config) {
   const wa = createWhatsAppClient(config);
   const baseDeps = { config, store, wa, templates };
 
-  /** Dispatches one request. Returns { status, body? , rawText?, afterAck? }. */
+  /** Dispatches one request via the shared route table (routes/router.mjs). */
   async function handle(ctx) {
-    // Businesses are editable data, so the registry is rebuilt per request.
     const deps = {
       ...baseDeps,
       businesses: await loadBusinessRegistry(store, config),
       integrations: createIntegrationService(store, config),
+      accounts: createAccountService(store),
     };
-    if (ctx.method === "GET" && ctx.pathname === "/health") {
-      return handleHealth();
-    }
-    if (ctx.method === "GET" && ctx.pathname === "/webhook") {
-      return verifyWebhookGet(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/webhook") {
-      return handleWebhookPost(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/missed-call") {
-      return handleMissedCall(ctx, deps);
-    }
-    if (ctx.method === "GET" && ctx.pathname === "/") {
-      return handleLanding(ctx, deps);
-    }
-    if (ctx.method === "GET" && ctx.pathname === "/leads") {
-      return handleDashboard(ctx, deps);
-    }
-    if (ctx.method === "GET" && ctx.pathname === "/lead") {
-      return handleLeadDetail(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/leads/status") {
-      return handleLeadStatus(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/lead/priority") {
-      return handleLeadPriority(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/lead/retry-notify") {
-      return handleRetryNotification(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/login") {
-      return handleLogin(ctx, deps);
-    }
-    if (ctx.method === "POST" && ctx.pathname === "/logout") {
-      return handleLogout(ctx, deps);
-    }
-    return { status: 404, body: { error: "not found" } };
+    if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
+    if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);
+    if (ctx.method === "POST" && ctx.pathname === "/missed-call") return handleMissedCall(ctx, deps);
+    return (await dispatch(ctx, deps)) ?? { status: 404, body: { error: "not found" } };
   }
 
   return { handle, store, wa, deps: baseDeps };
@@ -122,7 +89,6 @@ function startServer(config, app) {
 
       // /webhook verifies a signature over the raw bytes, and the dashboard
       // forms post url-encoded rather than JSON — none of them want this guard.
-      const NON_JSON_POSTS = new Set(["/webhook", "/login", "/logout", "/leads/status", "/lead/priority", "/lead/retry-notify"]);
       if (req.method === "POST" && json === null && !NON_JSON_POSTS.has(ctx.pathname)) {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ error: "malformed JSON body" }));

@@ -46,6 +46,13 @@ export function scopedToBusiness(store, businessId) {
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
     // Business records are deployment-wide, exposed unscoped.
+    saveUser: store.saveUser?.bind(store),
+    getUser: store.getUser?.bind(store),
+    getUserByEmail: store.getUserByEmail?.bind(store),
+    saveMembership: store.saveMembership?.bind(store),
+    deleteMembership: store.deleteMembership?.bind(store),
+    listMembershipsByUser: store.listMembershipsByUser?.bind(store),
+    listMembershipsByBusiness: store.listMembershipsByBusiness?.bind(store),
     saveIntegration: store.saveIntegration?.bind(store),
     getIntegration: store.getIntegration?.bind(store),
     getIntegrationByBusiness: store.getIntegrationByBusiness?.bind(store),
@@ -173,6 +180,47 @@ export function createRedisStore(env = process.env) {
     async getIntegrationByPhoneNumberId(phoneNumberId) {
       const id = await command('GET', 'integration:phone:' + phoneNumberId);
       return id ? this.getIntegration(id) : null;
+    },
+
+    // Users and memberships are deployment-wide. The email index is what
+    // makes login a lookup instead of a scan, and is lowercased by the
+    // caller so two casings can't become two accounts.
+    async saveUser(user) {
+      await command('SET', 'user:' + user.id, JSON.stringify(user));
+      await command('SET', 'user:email:' + user.email, user.id);
+    },
+    async getUser(id) {
+      const raw = await command('GET', 'user:' + id);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async getUserByEmail(email) {
+      const id = await command('GET', 'user:email:' + email);
+      return id ? this.getUser(id) : null;
+    },
+    async saveMembership(m) {
+      await command('SET', 'membership:' + m.id, JSON.stringify(m));
+      await command('SADD', 'memberships:user:' + m.userId, m.id);
+      await command('SADD', 'memberships:business:' + m.businessId, m.id);
+    },
+    async deleteMembership(id) {
+      const raw = await command('GET', 'membership:' + id);
+      if (!raw) return;
+      const m = JSON.parse(raw);
+      await command('SREM', 'memberships:user:' + m.userId, id);
+      await command('SREM', 'memberships:business:' + m.businessId, id);
+      await command('DEL', 'membership:' + id);
+    },
+    async listMembershipsByUser(userId) {
+      const ids = (await command('SMEMBERS', 'memberships:user:' + userId)) ?? [];
+      if (!ids.length) return [];
+      const raws = await command('MGET', ...ids.map((i) => 'membership:' + i));
+      return raws.filter(Boolean).map((x) => JSON.parse(x));
+    },
+    async listMembershipsByBusiness(businessId) {
+      const ids = (await command('SMEMBERS', 'memberships:business:' + businessId)) ?? [];
+      if (!ids.length) return [];
+      const raws = await command('MGET', ...ids.map((i) => 'membership:' + i));
+      return raws.filter(Boolean).map((x) => JSON.parse(x));
     },
 
     async hasProcessedMessage(id) {

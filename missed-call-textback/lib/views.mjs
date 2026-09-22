@@ -228,11 +228,14 @@ export function loginPage({ error } = {}) {
       <h1>Leads</h1>
       <p class="sub">Missed calls that turned into conversations.</p>
       <form method="POST" action="/login">
+        <label class="field" for="email">Email</label>
+        <input type="email" id="email" name="email" autocomplete="email" style="margin-bottom:14px">
         <label class="field" for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
         <button type="submit">Sign in</button>
         ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
       </form>
+      <p class="sub" style="margin-top:16px">No account? <a href="/signup">Create one</a>.</p>
     </div>`);
 }
 

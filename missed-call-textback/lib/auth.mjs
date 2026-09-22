@@ -75,9 +75,13 @@ export async function currentSession(ctx, store) {
  * authorization decision reads it from here, never from the request, so a
  * crafted parameter can't select another tenant.
  */
-export async function createSession(store, businessId = "default") {
+export async function createSession(store, businessId = "default", extra = {}) {
   const id = crypto.randomBytes(32).toString("hex");
-  await store.saveSession(id, { businessId, createdAt: new Date().toISOString() }, SESSION_TTL_SECONDS);
+  await store.saveSession(
+    id,
+    { businessId, ...extra, createdAt: new Date().toISOString() },
+    SESSION_TTL_SECONDS
+  );
   return id;
 }
 

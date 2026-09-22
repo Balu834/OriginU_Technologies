@@ -212,7 +212,7 @@ export async function handleRetryNotification(ctx, { store, wa, config, business
 }
 
 /** POST /login — verifies the password and starts a session. */
-export async function handleLogin(ctx, { store, config, businesses }) {
+export async function handleLogin(ctx, { store, config, businesses, accounts }) {
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
   }
@@ -228,6 +228,30 @@ export async function handleLogin(ctx, { store, config, businesses }) {
   // business owns the password is what keeps a second tenant's login from
   // landing in the first tenant's data — and it means the browser never
   // gets to nominate a businessId at all.
+  const email = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "").get("email") ?? "";
+
+  // A real account signs in with email + password and gets a session
+  // carrying its user id; the business and role are then resolved from
+  // the stored membership on every request.
+  if (email && accounts) {
+    const user = await accounts.authenticate({ email, password: submitted });
+    if (!user) {
+      log("dashboard_login_failed", {});
+      return { status: 401, html: loginPage({ error: "Incorrect email or password." }) };
+    }
+    const memberships = await accounts.membershipsOf(user.id);
+    const first = memberships[0] ?? null;
+    const id = await createSession(store, first?.businessId ?? null, { userId: user.id });
+    log("dashboard_login_succeeded", { hasBusiness: Boolean(first) });
+    return {
+      status: 302,
+      headers: { Location: first ? "/leads" : "/onboarding", "Set-Cookie": sessionCookie(id) },
+      body: {},
+    };
+  }
+
+  // TODO(remove): legacy per-business credential, kept so the existing
+  // default business keeps working until it has a real account.
   const business = businesses?.byPassword(submitted, verifyPassword) ?? null;
   const authorised = businesses ? Boolean(business) : verifyPassword(submitted, config.DASHBOARD_PASSWORD_HASH);
 

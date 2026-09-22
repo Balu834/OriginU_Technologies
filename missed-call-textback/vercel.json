@@ -3,35 +3,55 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "/api/landing"
+      "destination": "/api/app"
     },
     {
       "source": "/leads",
-      "destination": "/api/dashboard"
+      "destination": "/api/app"
     },
     {
       "source": "/lead",
-      "destination": "/api/lead-detail"
-    },
-    {
-      "source": "/lead/retry-notify",
-      "destination": "/api/lead-retry-notify"
+      "destination": "/api/app"
     },
     {
       "source": "/lead/priority",
-      "destination": "/api/lead-priority"
+      "destination": "/api/app"
+    },
+    {
+      "source": "/lead/retry-notify",
+      "destination": "/api/app"
     },
     {
       "source": "/leads/status",
-      "destination": "/api/lead-status"
+      "destination": "/api/app"
     },
     {
       "source": "/login",
-      "destination": "/api/login"
+      "destination": "/api/app"
     },
     {
       "source": "/logout",
-      "destination": "/api/logout"
+      "destination": "/api/app"
+    },
+    {
+      "source": "/signup",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/onboarding",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/whatsapp",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/team",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
     },
     {
       "source": "/missed-call",
@@ -40,10 +60,6 @@
     {
       "source": "/webhook",
       "destination": "/api/webhook"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/health"
     }
   ]
 }
