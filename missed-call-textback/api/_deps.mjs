@@ -7,7 +7,7 @@
 import { loadConfig, findMissingConfig } from "../config.mjs";
 import { createRedisStore } from "../lib/store.redis.mjs";
 import { createWhatsAppClient } from "../lib/whatsapp.mjs";
-import { createBusinessRegistry, businessFromConfig } from "../lib/businesses.mjs";
+import { loadBusinessRegistry } from "../lib/businesses.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -23,9 +23,21 @@ export function getDeps() {
 
   const store = createRedisStore(process.env);
   const wa = createWhatsAppClient(config);
-  const businesses = createBusinessRegistry([businessFromConfig(config)]);
-  cached = { config, store, wa, templates, businesses };
+  cached = { config, store, wa, templates };
   return cached;
+}
+
+/**
+ * Per-request deps including the business registry.
+ *
+ * The registry is loaded per request rather than cached with the rest of
+ * the deps, because businesses are now editable data — a cached registry
+ * would serve a stale tenant configuration until the lambda recycled.
+ */
+export async function getRequestDeps() {
+  const base = getDeps();
+  const businesses = await loadBusinessRegistry(base.store, base.config);
+  return { ...base, businesses };
 }
 
 /**

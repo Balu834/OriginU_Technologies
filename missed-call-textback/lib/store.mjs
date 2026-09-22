@@ -22,6 +22,7 @@ const EMPTY = () => ({
   messages: {},
   messageIndex: {},
   providerIndex: {},
+  businesses: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -97,6 +98,17 @@ export function createStore(filePath) {
     async updateMessage(message, ns = "") {
       data.messages[`${ns}${message.id}`] = message;
       persist();
+    },
+
+    async saveBusiness(business) {
+      data.businesses[business.id] = business;
+      persist();
+    },
+    async getBusiness(id) {
+      return data.businesses[id] ?? null;
+    },
+    async listBusinesses() {
+      return Object.values(data.businesses);
     },
 
     async hasProcessedMessage(id) {

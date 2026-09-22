@@ -45,6 +45,10 @@ export function scopedToBusiness(store, businessId) {
     lastMissedCallAt: (n) => store.lastMissedCallAt(ns + n),
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
+    // Business records are deployment-wide, exposed unscoped.
+    saveBusiness: store.saveBusiness,
+    getBusiness: store.getBusiness,
+    listBusinesses: store.listBusinesses,
     saveSession: store.saveSession,
     getSession: store.getSession,
     deleteSession: store.deleteSession,
@@ -125,6 +129,23 @@ export function createRedisStore(env = process.env) {
     },
     async updateMessage(message, ns = "") {
       await command("SET", `msg:${ns}${message.id}`, JSON.stringify(message));
+    },
+
+    // Businesses are deployment-wide, not tenant-scoped — a tenant must
+    // never be able to enumerate or edit another tenant's record.
+    async saveBusiness(business) {
+      await command('SET', 'business:' + business.id, JSON.stringify(business));
+      await command('SADD', 'businesses:index', business.id);
+    },
+    async getBusiness(id) {
+      const raw = await command('GET', 'business:' + id);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async listBusinesses() {
+      const ids = (await command('SMEMBERS', 'businesses:index')) ?? [];
+      if (!ids.length) return [];
+      const raws = await command('MGET', ...ids.map((id) => 'business:' + id));
+      return raws.filter(Boolean).map((x) => JSON.parse(x));
     },
 
     async hasProcessedMessage(id) {

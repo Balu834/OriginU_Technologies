@@ -18,6 +18,95 @@
  * business", which is how cross-tenant leaks happen.
  */
 
+/**
+ * A business as stored data, rather than environment configuration.
+ *
+ * Profile, services, areas and greeting live here so a business can be
+ * configured at runtime instead of by redeploying. Meta credentials
+ * deliberately do NOT: they stay in the environment, server-side only,
+ * which is also why this remains single-business for WhatsApp until each
+ * tenant can hold its own credentials in a secret store.
+ */
+export function businessRecord({
+  id,
+  name = "",
+  industry = "",
+  businessPhone = "",
+  timezone = "Asia/Kolkata",
+  ownerName = "",
+  ownerWhatsApp = "",
+  services = [],
+  areas = [],
+  greeting = "",
+  assistantName = "",
+  phoneNumberId = "",
+  wabaId = "",
+  missedCallApiKey = "",
+  missedCallTemplate = "",
+  templateLanguage = "en",
+  passwordHash = "",
+  status = "active",
+  createdAt = null,
+  updatedAt = null,
+} = {}) {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name,
+    industry,
+    businessPhone,
+    timezone,
+    ownerName,
+    ownerWhatsApp,
+    services: [...services],
+    areas: [...areas],
+    greeting,
+    assistantName,
+    phoneNumberId: String(phoneNumberId ?? ""),
+    wabaId,
+    missedCallApiKey,
+    missedCallTemplate,
+    templateLanguage,
+    passwordHash,
+    status,
+    createdAt: createdAt ?? now,
+    updatedAt: updatedAt ?? now,
+  };
+}
+
+export const CONNECTION_STATES = ["NOT_CONNECTED", "CONFIGURED", "CONNECTED", "ERROR"];
+
+/**
+ * WhatsApp connection state, derived from evidence rather than from the
+ * presence of configuration.
+ *
+ * CONFIGURED means the fields exist. CONNECTED means Meta has actually
+ * accepted traffic for this number — proven by a recorded successful
+ * send, not by someone having filled in a form. Claiming CONNECTED from
+ * configuration alone is exactly the lie this project has been bitten by:
+ * an accepted API call is not a delivered message, and a filled-in field
+ * is not a working integration.
+ */
+export function connectionState(business, evidence = {}) {
+  if (evidence.lastError) return "ERROR";
+  const configured = Boolean(business?.phoneNumberId) && Boolean(business?.missedCallTemplate);
+  if (!configured) return "NOT_CONNECTED";
+  return evidence.lastSuccessfulSendAt ? "CONNECTED" : "CONFIGURED";
+}
+
+export function onboardingStatus(business, evidence = {}) {
+  const profileComplete = Boolean(business?.name && business?.ownerName && business?.ownerWhatsApp);
+  const aiConfigured = Boolean(business?.services?.length || business?.greeting);
+  const connection = connectionState(business, evidence);
+  return {
+    PROFILE_COMPLETE: profileComplete,
+    WHATSAPP_CONNECTED: connection === "CONNECTED",
+    AI_CONFIGURED: aiConfigured,
+    ONBOARDING_COMPLETE: profileComplete && aiConfigured && connection === "CONNECTED",
+    connection,
+  };
+}
+
 /** Builds the single env-configured business. */
 export function businessFromConfig(config) {
   return {
@@ -37,6 +126,45 @@ export function businessFromConfig(config) {
     status: "active",
     createdAt: config.BUSINESS_CREATED_AT ?? null,
   };
+}
+
+/**
+ * Builds the registry from stored businesses plus the env-configured one.
+ *
+ * The env business always wins for its own id. That is deliberate: the
+ * live `default` tenant's Meta credentials and phone number come from the
+ * environment, and a stored record must never be able to shadow them —
+ * otherwise a bad write to the store could silently redirect a working
+ * production integration.
+ *
+ * Stored businesses supply everything the environment can't: profile,
+ * services, areas, greeting. For `default` those are merged in underneath
+ * the env values, so it can be configured at runtime without putting its
+ * credentials in the database.
+ */
+export async function loadBusinessRegistry(store, config) {
+  const envBusiness = businessFromConfig(config);
+  let stored = [];
+  try {
+    stored = (await store.listBusinesses?.()) ?? [];
+  } catch {
+    stored = []; // a store failure must not take the live tenant offline
+  }
+
+  const storedDefault = stored.find((b) => b.id === envBusiness.id);
+  const merged = storedDefault
+    ? { ...storedDefault, ...stripEmpty(envBusiness) }
+    : envBusiness;
+
+  const others = stored.filter((b) => b.id !== envBusiness.id);
+  return createBusinessRegistry([merged, ...others]);
+}
+
+/** Env values only override where they actually have a value. */
+function stripEmpty(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== "" && v !== null && v !== undefined)
+  );
 }
 
 export function createBusinessRegistry(businesses) {
@@ -106,12 +234,40 @@ export function createBusinessRegistry(businesses) {
   };
 }
 
-/** Only what the conversation layer legitimately needs — never keys or tokens. */
+/**
+ * Safety rules that belong to the product, not to any business.
+ *
+ * These are returned as a frozen object and merged AFTER business
+ * configuration, so a tenant cannot switch them off by putting contrary
+ * text in their greeting or services. A business configures what it does;
+ * it does not get to configure whether the assistant may diagnose a
+ * live electrical fault.
+ */
+export const SAFETY_RULES = Object.freeze({
+  neverDiagnose: true,
+  neverQuotePrices: true,
+  neverPromiseAppointments: true,
+  emergencyGuidanceOnly: true,
+});
+
+/**
+ * Everything the conversation layer legitimately needs about a business —
+ * and nothing else. Credentials are structurally absent rather than
+ * filtered out, so a future field added to the record can't leak here by
+ * being forgotten.
+ */
 export function businessContext(business) {
   return {
     id: business.id,
     name: business.name,
     ownerName: business.ownerName,
     ownerWhatsApp: business.ownerWhatsApp,
+    industry: business.industry ?? "",
+    services: [...(business.services ?? [])],
+    areas: [...(business.areas ?? [])],
+    greeting: business.greeting ?? "",
+    assistantName: business.assistantName ?? "",
+    timezone: business.timezone ?? "Asia/Kolkata",
+    safety: SAFETY_RULES,
   };
 }

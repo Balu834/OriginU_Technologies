@@ -1,5 +1,5 @@
 import { handleMissedCall } from "../routes/missedCall.mjs";
-import { getDeps, readRawBody } from "./_deps.mjs";
+import { getRequestDeps, readRawBody } from "./_deps.mjs";
 import { logError } from "../lib/logger.mjs";
 
 export const config = { api: { bodyParser: false } };
@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "method not allowed" });
 
   try {
-    const deps = getDeps();
+    const deps = await getRequestDeps();
     const rawBody = await readRawBody(req);
     let json;
     try {

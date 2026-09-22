@@ -1,11 +1,11 @@
 import { handleLeadDetail } from "../routes/dashboard.mjs";
-import { getDeps, sendResult, ctxFromRequest } from "./_deps.mjs";
+import { getRequestDeps, sendResult, ctxFromRequest } from "./_deps.mjs";
 import { logError } from "../lib/logger.mjs";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
   try {
-    const result = await handleLeadDetail(ctxFromRequest(req), getDeps());
+    const result = await handleLeadDetail(ctxFromRequest(req), await getRequestDeps());
     return sendResult(res, result);
   } catch (err) {
     logError("lead_detail_handler_error", err, {});

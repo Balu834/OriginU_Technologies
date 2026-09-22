@@ -1,12 +1,12 @@
 import { verifyWebhookGet, handleWebhookPost } from "../routes/webhook.mjs";
-import { getDeps, readRawBody } from "./_deps.mjs";
+import { getRequestDeps, readRawBody } from "./_deps.mjs";
 import { logError } from "../lib/logger.mjs";
 
 export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   try {
-    const deps = getDeps();
+    const deps = await getRequestDeps();
 
     if (req.method === "GET") {
       const url = new URL(req.url, "http://localhost");
