@@ -46,6 +46,10 @@ export function scopedToBusiness(store, businessId) {
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
     // Business records are deployment-wide, exposed unscoped.
+    saveIntegration: store.saveIntegration?.bind(store),
+    getIntegration: store.getIntegration?.bind(store),
+    getIntegrationByBusiness: store.getIntegrationByBusiness?.bind(store),
+    getIntegrationByPhoneNumberId: store.getIntegrationByPhoneNumberId?.bind(store),
     saveBusiness: store.saveBusiness,
     getBusiness: store.getBusiness,
     listBusinesses: store.listBusinesses,
@@ -146,6 +150,29 @@ export function createRedisStore(env = process.env) {
       if (!ids.length) return [];
       const raws = await command('MGET', ...ids.map((id) => 'business:' + id));
       return raws.filter(Boolean).map((x) => JSON.parse(x));
+    },
+
+    // Integrations are deployment-wide records keyed two ways: by business
+    // (what to send with) and by phone number id (who an inbound message
+    // belongs to). The phone-number index is what makes routing a lookup
+    // rather than a scan.
+    async saveIntegration(integration) {
+      await command('SET', 'integration:' + integration.id, JSON.stringify(integration));
+      await command('SET', 'integration:business:' + integration.businessId, integration.id);
+      await command('SET', 'integration:phone:' + integration.phoneNumberId, integration.id);
+      await command('SADD', 'integrations:index', integration.id);
+    },
+    async getIntegration(id) {
+      const raw = await command('GET', 'integration:' + id);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async getIntegrationByBusiness(businessId) {
+      const id = await command('GET', 'integration:business:' + businessId);
+      return id ? this.getIntegration(id) : null;
+    },
+    async getIntegrationByPhoneNumberId(phoneNumberId) {
+      const id = await command('GET', 'integration:phone:' + phoneNumberId);
+      return id ? this.getIntegration(id) : null;
     },
 
     async hasProcessedMessage(id) {

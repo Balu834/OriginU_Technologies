@@ -23,6 +23,9 @@ const EMPTY = () => ({
   messageIndex: {},
   providerIndex: {},
   businesses: {},
+  integrations: {},
+  integrationByBusiness: {},
+  integrationByPhone: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -109,6 +112,24 @@ export function createStore(filePath) {
     },
     async listBusinesses() {
       return Object.values(data.businesses);
+    },
+
+    async saveIntegration(integration) {
+      data.integrations[integration.id] = integration;
+      data.integrationByBusiness[integration.businessId] = integration.id;
+      data.integrationByPhone[integration.phoneNumberId] = integration.id;
+      persist();
+    },
+    async getIntegration(id) {
+      return data.integrations[id] ?? null;
+    },
+    async getIntegrationByBusiness(businessId) {
+      const id = data.integrationByBusiness[businessId];
+      return id ? (data.integrations[id] ?? null) : null;
+    },
+    async getIntegrationByPhoneNumberId(phoneNumberId) {
+      const id = data.integrationByPhone[phoneNumberId];
+      return id ? (data.integrations[id] ?? null) : null;
     },
 
     async hasProcessedMessage(id) {

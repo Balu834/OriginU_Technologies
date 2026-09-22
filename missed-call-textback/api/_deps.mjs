@@ -8,6 +8,7 @@ import { loadConfig, findMissingConfig } from "../config.mjs";
 import { createRedisStore } from "../lib/store.redis.mjs";
 import { createWhatsAppClient } from "../lib/whatsapp.mjs";
 import { loadBusinessRegistry } from "../lib/businesses.mjs";
+import { createIntegrationService } from "../lib/integrations.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -37,7 +38,8 @@ export function getDeps() {
 export async function getRequestDeps() {
   const base = getDeps();
   const businesses = await loadBusinessRegistry(base.store, base.config);
-  return { ...base, businesses };
+  const integrations = createIntegrationService(base.store, base.config);
+  return { ...base, businesses, integrations };
 }
 
 /**

@@ -56,6 +56,12 @@ export function loadConfig(env = process.env, dir = here) {
     // "salt:hash" from `node scripts/hash-password.mjs <password>`. Optional:
     // without it the dashboard refuses to serve rather than running open.
     DASHBOARD_PASSWORD_HASH: merged.DASHBOARD_PASSWORD_HASH ?? "",
+    // Encrypts per-business integration credentials at rest. Stays in the
+    // environment: a key stored beside its ciphertext protects nothing.
+    INTEGRATION_ENCRYPTION_KEY: merged.INTEGRATION_ENCRYPTION_KEY ?? "",
+    // MIGRATION-ONLY: the single business allowed to fall back to the
+    // global META_* variables. TODO(remove) once its integration is stored.
+    MIGRATION_DEFAULT_BUSINESS_ID: merged.MIGRATION_DEFAULT_BUSINESS_ID ?? "default",
     PORT: Number(merged.PORT ?? 3000),
     DATA_DIR: dataDir,
     DEMO_MODE: merged.DEMO_MODE === "1" || merged.DEMO_MODE === "true",

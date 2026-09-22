@@ -22,6 +22,7 @@ import { loadConfig, findMissingConfig } from "./config.mjs";
 import { createStore } from "./lib/store.mjs";
 import { createWhatsAppClient } from "./lib/whatsapp.mjs";
 import { loadBusinessRegistry } from "./lib/businesses.mjs";
+import { createIntegrationService } from "./lib/integrations.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { handleHealth } from "./routes/health.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
@@ -40,7 +41,11 @@ export function buildApp(config) {
   /** Dispatches one request. Returns { status, body? , rawText?, afterAck? }. */
   async function handle(ctx) {
     // Businesses are editable data, so the registry is rebuilt per request.
-    const deps = { ...baseDeps, businesses: await loadBusinessRegistry(store, config) };
+    const deps = {
+      ...baseDeps,
+      businesses: await loadBusinessRegistry(store, config),
+      integrations: createIntegrationService(store, config),
+    };
     if (ctx.method === "GET" && ctx.pathname === "/health") {
       return handleHealth();
     }

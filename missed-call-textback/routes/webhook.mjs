@@ -1,4 +1,4 @@
-import { verifySignature } from "../lib/whatsapp.mjs";
+import { verifySignature, createWhatsAppClientFor } from "../lib/whatsapp.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
@@ -23,9 +23,14 @@ export function verifyWebhookGet(ctx, { config }) {
  * each is wrapped in its own try/catch.
  */
 export function handleWebhookPost(ctx, deps) {
-  const { config, store, wa, templates, businesses } = deps;
+  const { config, store, wa, templates, businesses, integrations, verifySecrets } = deps;
 
-  const valid = verifySignature(ctx.rawBody, ctx.headers["x-hub-signature-256"], config.META_APP_SECRET);
+  // Signature is checked against the app secret before the payload can be
+  // parsed, so the business is not yet known. Meta signs with the APP
+  // secret (one per app, not per number), which is why this legitimately
+  // stays app-level — see the Meta limitation noted in the final report.
+  const appSecret = verifySecrets?.appSecret ?? config.META_APP_SECRET;
+  const valid = verifySignature(ctx.rawBody, ctx.headers["x-hub-signature-256"], appSecret);
   if (!valid) {
     logError("webhook_invalid_signature", new Error("signature mismatch"), {});
     return { status: 403, body: { error: "invalid signature" } };
@@ -70,12 +75,40 @@ export function handleWebhookPost(ctx, deps) {
         // defaulting to "the first business" is how tenants leak into
         // each other.
         const phoneNumberId = change.value?.metadata?.phone_number_id;
-        const business = businesses?.byPhoneNumberId(phoneNumberId) ?? null;
-        if (businesses && !business) {
+
+        // Server-side mapping only: phone_number_id -> integration ->
+        // businessId. Nothing about the request body, query string or any
+        // logged-in user participates in this decision.
+        let business = null;
+        let integration = null;
+        if (integrations) {
+          integration = await integrations.byPhoneNumberId(phoneNumberId);
+          business = integration ? businesses?.byId(integration.businessId) ?? null : null;
+        } else {
+          business = businesses?.byPhoneNumberId(phoneNumberId) ?? null;
+        }
+
+        if ((businesses || integrations) && !business) {
+          // Unattributable: dropped, never filed under default.
           log("webhook_unknown_business", { phoneNumberId: phoneNumberId ? "present" : "missing" });
           continue;
         }
         const tenantStore = business ? scopedToBusiness(store, business.id) : store;
+
+        // Replies go out on the credentials of the business the message
+        // arrived for — never a shared client. Without an integration
+        // there is nothing to send with, so the global client is used only
+        // where no integration layer is wired at all (tests, local runs).
+        let tenantWa = wa;
+        if (integration && integrations) {
+          const secrets = integrations.secretsOf(integration);
+          if (secrets?.accessToken) {
+            tenantWa = createWhatsAppClientFor({
+              phoneNumberId: integration.phoneNumberId,
+              accessToken: secrets.accessToken,
+            });
+          }
+        }
         const tenantConfig = business
           ? { ...config, BUSINESS_NAME: business.name, OWNER_NAME: business.ownerName,
               MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp }
@@ -120,7 +153,7 @@ export function handleWebhookPost(ctx, deps) {
 
             const result = await handleInboundMessage(
               { from, text: msg.text.body, messageId: msg.id, messageType: msg.type, timestamp: msg.timestamp },
-              { store: tenantStore, wa, config: tenantConfig, templates }
+              { store: tenantStore, wa: tenantWa, config: tenantConfig, templates }
             );
             if (result.emergency) log("emergency_detected", { from });
             if (result.leadCompleted) log("lead_completed", { from, leadId: result.lead?.id });

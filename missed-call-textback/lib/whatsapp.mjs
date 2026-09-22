@@ -1,6 +1,22 @@
 import crypto from "node:crypto";
 import { logError } from "./logger.mjs";
 
+/**
+ * A client bound to ONE business's credentials.
+ *
+ * Callers pass the phone number id and access token explicitly rather
+ * than the client reaching for globals, so sending on behalf of a
+ * business is impossible without first resolving that business's
+ * integration. `createWhatsAppClient(config)` is kept as the single-tenant
+ * shorthand and simply forwards the env values.
+ */
+export function createWhatsAppClientFor({ phoneNumberId, accessToken }, { fetchImpl = fetch } = {}) {
+  return createWhatsAppClient(
+    { META_PHONE_NUMBER_ID: phoneNumberId, META_ACCESS_TOKEN: accessToken },
+    { fetchImpl }
+  );
+}
+
 export function createWhatsAppClient(config, { fetchImpl = fetch } = {}) {
   const base = `https://graph.facebook.com/v21.0/${config.META_PHONE_NUMBER_ID}/messages`;
 
