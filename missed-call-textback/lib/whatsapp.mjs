@@ -16,7 +16,18 @@ export function createWhatsAppClient(config, { fetchImpl = fetch } = {}) {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        logError("meta_api_error", new Error(`status ${res.status}`), { status: res.status });
+        // Meta's own error code is the only thing that distinguishes, say,
+        // "recipient not in allowed list" (131030) from "outside the 24h
+        // window" (131047). Logging just the HTTP status makes every
+        // failure look identical and forces a manual API call to diagnose.
+        // Codes and messages are API metadata, not secrets or customer data.
+        logError("meta_api_error", new Error(`status ${res.status}`), {
+          status: res.status,
+          metaCode: body?.error?.code ?? null,
+          metaSubcode: body?.error?.error_subcode ?? null,
+          metaMessage: body?.error?.message ?? null,
+          metaTrace: body?.error?.fbtrace_id ?? null,
+        });
       }
       return { ok: res.ok, status: res.status, body };
     } catch (err) {
