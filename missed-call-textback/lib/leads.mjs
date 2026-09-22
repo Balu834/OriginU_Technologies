@@ -21,6 +21,53 @@ export function isValidStatus(status) {
   return LEAD_STATUSES.includes(status);
 }
 
+/**
+ * Priority is how fast this needs attention. It is deliberately NOT the
+ * same field as `urgency`, which holds the customer's own words about
+ * timing ("today", "flexible"). Conflating them would mean a customer
+ * saying "today" outranked a sparking socket.
+ *
+ * URGENT is derived from emergency detection; the owner can also set it
+ * by hand. Leads written before this field existed have no `priority`,
+ * so it falls back to their `emergency` flag rather than being backfilled
+ * with a guess.
+ */
+export const PRIORITIES = ["NORMAL", "URGENT"];
+
+export function isValidPriority(priority) {
+  return PRIORITIES.includes(priority);
+}
+
+export function leadPriority(lead) {
+  if (isValidPriority(lead?.priority)) return lead.priority;
+  return lead?.emergency ? "URGENT" : "NORMAL";
+}
+
+/**
+ * Which statuses a lead may move to from where it is.
+ *
+ * Reopening (completed/lost -> active) is intentionally kept: it shipped
+ * in the current product and a cold customer genuinely does come back.
+ * Removing it would delete working behaviour, so it stays and is stated
+ * here explicitly rather than silently assumed.
+ */
+const TRANSITIONS = {
+  new: ["contacted", "in_progress", "lost"],
+  contacted: ["in_progress", "completed", "lost"],
+  in_progress: ["completed", "lost"],
+  completed: ["in_progress"],
+  lost: ["contacted"],
+};
+
+export function allowedTransitions(from) {
+  return TRANSITIONS[from] ?? [];
+}
+
+export function canTransition(from, to) {
+  if (!isValidStatus(from) || !isValidStatus(to)) return false;
+  return allowedTransitions(from).includes(to);
+}
+
 export function createLead({ callerNumber, fields, emergency }) {
   const now = new Date().toISOString();
   return {
@@ -32,10 +79,13 @@ export function createLead({ callerNumber, fields, emergency }) {
     urgency: fields.urgency ?? "",
     summary: buildSummary(fields),
     status: "new",
+    priority: emergency ? "URGENT" : "NORMAL",
     source: "missed_call_whatsapp",
     emergency: Boolean(emergency),
     createdAt: now,
     updatedAt: now,
+    statusChangedAt: now,
+    lastActivityAt: now,
   };
 }
 

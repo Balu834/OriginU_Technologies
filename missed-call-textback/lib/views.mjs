@@ -14,7 +14,7 @@
  * CDN request or a base64 payload on every page load, and neither is worth
  * it on Indian mobile data.
  */
-import { LEAD_STATUSES, STATUS_LABELS, isValidStatus } from "./leads.mjs";
+import { LEAD_STATUSES, STATUS_LABELS, isValidStatus, leadPriority, allowedTransitions } from "./leads.mjs";
 
 export function escapeHtml(value) {
   return String(value ?? "")
@@ -264,20 +264,8 @@ function fact(label, value) {
   return `<dt>${escapeHtml(label)}</dt><dd${text ? "" : ' class="dim"'}>${escapeHtml(text || "Not given")}</dd>`;
 }
 
-/** The next sensible states from where a lead is now — shown as one-tap buttons. */
-function nextStatuses(current) {
-  const flow = {
-    new: ["contacted", "lost"],
-    contacted: ["in_progress", "completed", "lost"],
-    in_progress: ["completed", "lost"],
-    completed: ["in_progress"],
-    lost: ["contacted"],
-  };
-  return flow[current] ?? ["contacted", "lost"];
-}
-
 function leadCard(lead, query) {
-  const urgent = Boolean(lead.emergency);
+  const urgent = leadPriority(lead) === "URGENT";
   const raw = String(lead.callerNumber ?? "");
   const digits = dialable(raw);
   const status = isValidStatus(lead.status) ? lead.status : "new";
@@ -286,7 +274,7 @@ function leadCard(lead, query) {
   // owner back to an unfiltered list.
   const back = new URLSearchParams(query ?? {}).toString();
 
-  const statusButtons = nextStatuses(status)
+  const statusButtons = allowedTransitions(status)
     .map(
       (next) => `
       <form method="POST" action="/leads/status">
@@ -338,8 +326,9 @@ export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
   return leads.filter((lead) => {
     if (!leadMatchesSearch(lead, q)) return false;
     if (status && (lead.status ?? "new") !== status) return false;
-    if (urgency === "urgent" && !lead.emergency) return false;
-    if (urgency === "normal" && lead.emergency) return false;
+    const urgent = leadPriority(lead) === "URGENT";
+    if (urgency === "urgent" && !urgent) return false;
+    if (urgency === "normal" && urgent) return false;
     return true;
   });
 }
@@ -354,7 +343,8 @@ export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
 export function leadDetailPage(lead, messages = []) {
   const raw = String(lead.callerNumber ?? "");
   const digits = dialable(raw);
-  const urgent = Boolean(lead.emergency);
+  const priority = leadPriority(lead);
+  const urgent = priority === "URGENT";
   const status = isValidStatus(lead.status) ? lead.status : "new";
 
   const conversation = messages.filter((m) => m.senderType === "customer" || m.senderType === "assistant");
@@ -407,18 +397,45 @@ export function leadDetailPage(lead, messages = []) {
         <span class="status status-${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status])}</span>
       </div>
       ${lead.ownerNotified === false
-        ? `<p class="undelivered">WhatsApp alert for this lead failed to send — it only exists here.</p>`
+        ? `<div class="undelivered">
+             <p>WhatsApp alert for this lead failed to send — it only exists here.</p>
+             <form method="POST" action="/lead/retry-notify">
+               <input type="hidden" name="id" value="${escapeHtml(lead.id)}">
+               <button type="submit">Retry notification</button>
+             </form>
+           </div>`
         : ""}
       <dl class="facts">
         ${fact("Phone", raw)}
         ${fact("Problem", lead.problem)}
         ${fact("Area", lead.area)}
-        ${fact("Urgency", lead.urgency)}
+        ${fact("Timing", lead.urgency)}
+        ${fact("Priority", priority)}
         ${fact("Summary", lead.summary)}
+        ${fact("Created", formatWhen(lead.createdAt))}
+        ${fact("Updated", formatWhen(lead.updatedAt ?? lead.createdAt))}
+        ${lead.lastActivityAt ? fact("Last activity", formatWhen(lead.lastActivityAt)) : ""}
       </dl>
       <div class="actions">
         <a class="btn primary" href="tel:${escapeHtml(digits)}">Call</a>
         ${digits ? `<a class="btn" href="https://wa.me/${escapeHtml(digits)}">WhatsApp</a>` : ""}
+      </div>
+      <div class="statusbar">
+        <span class="statusbar-label">Move to</span>
+        ${allowedTransitions(status).map((next) => `
+          <form method="POST" action="/leads/status">
+            <input type="hidden" name="id" value="${escapeHtml(lead.id)}">
+            <input type="hidden" name="status" value="${escapeHtml(next)}">
+            <button type="submit">${escapeHtml(STATUS_LABELS[next])}</button>
+          </form>`).join("")}
+      </div>
+      <div class="statusbar">
+        <span class="statusbar-label">Priority</span>
+        <form method="POST" action="/lead/priority">
+          <input type="hidden" name="id" value="${escapeHtml(lead.id)}">
+          <input type="hidden" name="priority" value="${priority === "URGENT" ? "NORMAL" : "URGENT"}">
+          <button type="submit">Mark ${priority === "URGENT" ? "normal" : "urgent"}</button>
+        </form>
       </div>
     </article>
 
@@ -439,7 +456,7 @@ export function dashboardPage(leads, query = {}) {
   const sorted = [...leads].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
   const visible = filterLeads(sorted, { q, status, urgency });
 
-  const urgentCount = sorted.filter((l) => l.emergency).length;
+  const urgentCount = sorted.filter((l) => leadPriority(l) === "URGENT").length;
   const filtering = Boolean(q || status || urgency);
 
   const tally = sorted.length

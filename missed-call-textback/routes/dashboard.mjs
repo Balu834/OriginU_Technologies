@@ -1,6 +1,7 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
 import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
-import { isValidStatus } from "../lib/leads.mjs";
+import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
+import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { landingPage } from "../lib/landing.mjs";
 import { log } from "../lib/logger.mjs";
@@ -100,13 +101,114 @@ export async function handleLeadStatus(ctx, { store, businesses }) {
     return { status: 302, headers: { Location: "/leads" }, body: {} };
   }
 
-  await tenantStore.saveLead({ ...lead, status, updatedAt: new Date().toISOString() });
-  log("lead_status_changed", { leadId: id, status });
+  // The transition itself is validated, not just the destination value —
+  // otherwise a lead could jump straight from new to completed and the
+  // workflow would record something that never happened.
+  const current = isValidStatus(lead.status) ? lead.status : "new";
+  if (current !== status && !canTransition(current, status)) {
+    log("lead_status_rejected", { reason: "invalid transition", from: current, to: status });
+    return { status: 302, headers: { Location: "/leads" }, body: {} };
+  }
+
+  const now = new Date().toISOString();
+  await tenantStore.saveLead({
+    ...lead,
+    status,
+    updatedAt: now,
+    statusChangedAt: current === status ? (lead.statusChangedAt ?? now) : now,
+    lastActivityAt: now,
+  });
+  log("lead_status_changed", { leadId: id, from: current, to: status });
 
   // `back` only ever carries our own filter params; rebuilding it through
   // URLSearchParams keeps a crafted value from turning into an open redirect.
   const params = new URLSearchParams(back).toString();
   return { status: 302, headers: { Location: params ? `/leads?${params}` : "/leads" }, body: {} };
+}
+
+/**
+ * POST /lead/priority — flips a lead between NORMAL and URGENT.
+ *
+ * Separate from status on purpose: how fast this needs attention is a
+ * different question from where it sits in the follow-up workflow.
+ */
+export async function handleLeadPriority(ctx, { store, businesses }) {
+  const session = await currentSession(ctx, store);
+  if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
+
+  const tenantStore = tenantStoreFor(session, store, businesses);
+  const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
+  const id = form.get("id") ?? "";
+  const priority = form.get("priority") ?? "";
+
+  if (!isValidPriority(priority)) {
+    log("lead_priority_rejected", { reason: "unknown priority" });
+    return { status: 302, headers: { Location: "/leads" }, body: {} };
+  }
+
+  const lead = await tenantStore.getLead(id);
+  if (!lead) {
+    log("lead_priority_rejected", { reason: "unknown lead" });
+    return { status: 302, headers: { Location: "/leads" }, body: {} };
+  }
+
+  const now = new Date().toISOString();
+  await tenantStore.saveLead({ ...lead, priority, updatedAt: now, lastActivityAt: now });
+  log("lead_priority_changed", { leadId: id, priority });
+
+  return { status: 302, headers: { Location: `/lead?id=${encodeURIComponent(id)}` }, body: {} };
+}
+
+/**
+ * POST /lead/retry-notify — resends the owner alert for one existing lead.
+ *
+ * Deliberately narrow: it re-sends the notification and nothing else. It
+ * does not touch the lead's status, does not re-run the conversation, and
+ * cannot create a lead — the lead must already exist to be found. On
+ * success `ownerNotified` flips to true; on failure it stays false so the
+ * dashboard keeps showing the lead as undelivered rather than quietly
+ * claiming success.
+ */
+export async function handleRetryNotification(ctx, { store, wa, config, businesses }) {
+  const session = await currentSession(ctx, store);
+  if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
+
+  const tenantStore = tenantStoreFor(session, store, businesses);
+  const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
+  const id = form.get("id") ?? "";
+
+  const lead = await tenantStore.getLead(id);
+  if (!lead) {
+    log("notification_retry_rejected", { reason: "unknown lead" });
+    return { status: 302, headers: { Location: "/leads" }, body: {} };
+  }
+
+  const business = businesses?.byId(session.businessId ?? "default");
+  const destination = business?.ownerWhatsApp ?? config.MOHAMED_WHATSAPP_NUMBER;
+
+  const result = await wa.sendText(destination, formatOwnerNotification(lead));
+  const ownerNotified = result?.ok !== false;
+
+  if (tenantStore.saveMessage) {
+    await tenantStore.saveMessage(
+      createMessage({
+        conversationId: lead.callerNumber,
+        leadId: lead.id,
+        direction: "outbound",
+        senderType: "owner",
+        customerPhone: lead.callerNumber,
+        messageId: providerMessageId(result),
+        text: formatOwnerNotification(lead),
+        metadata: { accepted: ownerNotified, retry: true, to: destination },
+      })
+    );
+  }
+
+  const now = new Date().toISOString();
+  await tenantStore.saveLead({ ...lead, ownerNotified, updatedAt: now, lastActivityAt: now });
+  log(ownerNotified ? "notification_retry_succeeded" : "notification_retry_failed", { leadId: id });
+
+  return { status: 302, headers: { Location: `/lead?id=${encodeURIComponent(id)}` }, body: {} };
 }
 
 /** POST /login — verifies the password and starts a session. */

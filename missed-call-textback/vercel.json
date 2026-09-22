@@ -14,6 +14,14 @@
       "destination": "/api/lead-detail"
     },
     {
+      "source": "/lead/retry-notify",
+      "destination": "/api/lead-retry-notify"
+    },
+    {
+      "source": "/lead/priority",
+      "destination": "/api/lead-priority"
+    },
+    {
       "source": "/leads/status",
       "destination": "/api/lead-status"
     },
