@@ -212,7 +212,7 @@ export async function handleRetryNotification(ctx, { store, wa, config, business
 }
 
 /** POST /login — verifies the password and starts a session. */
-export async function handleLogin(ctx, { store, config }) {
+export async function handleLogin(ctx, { store, config, businesses }) {
   if (!config.DASHBOARD_PASSWORD_HASH) {
     return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
   }
@@ -223,13 +223,21 @@ export async function handleLogin(ctx, { store, config }) {
   }
 
   const submitted = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "").get("password") ?? "";
-  if (!verifyPassword(submitted, config.DASHBOARD_PASSWORD_HASH)) {
+
+  // The credential decides the tenant. Binding the session to whichever
+  // business owns the password is what keeps a second tenant's login from
+  // landing in the first tenant's data — and it means the browser never
+  // gets to nominate a businessId at all.
+  const business = businesses?.byPassword(submitted, verifyPassword) ?? null;
+  const authorised = businesses ? Boolean(business) : verifyPassword(submitted, config.DASHBOARD_PASSWORD_HASH);
+
+  if (!authorised) {
     log("dashboard_login_failed", {});
     return { status: 401, html: loginPage({ error: "Incorrect password." }) };
   }
 
-  const id = await createSession(store);
-  log("dashboard_login_succeeded", {});
+  const id = await createSession(store, business?.id ?? "default");
+  log("dashboard_login_succeeded", { businessId: business?.id ?? "default" });
   return {
     status: 302,
     headers: { Location: "/leads", "Set-Cookie": sessionCookie(id) },

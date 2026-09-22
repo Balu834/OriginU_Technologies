@@ -30,7 +30,12 @@ export function businessFromConfig(config) {
     missedCallApiKey: config.MISSED_CALL_API_KEY,
     missedCallTemplate: config.WHATSAPP_MISSED_CALL_TEMPLATE,
     templateLanguage: config.WHATSAPP_TEMPLATE_LANGUAGE,
+    // The dashboard credential belongs to the business, not to the
+    // deployment. One hash per business is what makes a second tenant's
+    // login resolve to a different tenant's data.
+    passwordHash: config.DASHBOARD_PASSWORD_HASH,
     status: "active",
+    createdAt: config.BUSINESS_CREATED_AT ?? null,
   };
 }
 
@@ -76,6 +81,27 @@ export function createBusinessRegistry(businesses) {
     byApiKey(key, timingSafeEqualStr) {
       if (!key) return null;
       return all.find((b) => b.missedCallApiKey && timingSafeEqualStr(key, b.missedCallApiKey)) ?? null;
+    },
+
+    /**
+     * Resolves which business a dashboard password belongs to.
+     *
+     * Every candidate is checked rather than returning on the first hit,
+     * so the work done — and therefore the time taken — doesn't depend on
+     * which business matched or how far down the list it sits.
+     *
+     * Scaling note: with no user model there is no username to look the
+     * business up by, so this is O(businesses) scrypt verifications per
+     * login attempt. Fine for a handful of tenants; a real user/identity
+     * model is required before this is the login path for many.
+     */
+    byPassword(password, verifyPassword) {
+      if (!password) return null;
+      let found = null;
+      for (const b of all) {
+        if (b.passwordHash && verifyPassword(password, b.passwordHash)) found ??= b;
+      }
+      return found;
     },
   };
 }
