@@ -10,6 +10,7 @@ import { extractFields, applyAwaitingFallback, nextMissingField } from "./extrac
 import { createLead, formatOwnerNotification } from "./leads.mjs";
 import { logError } from "./logger.mjs";
 import { createMessage, providerMessageId } from "./messages.mjs";
+import { greetingLine, servicesLine, areasLine, compose, ownerNameFor } from "./voice.mjs";
 
 const QUESTION_KEY = { problem: "ask_problem", area: "ask_area", name: "ask_name", urgency: "ask_urgency" };
 
@@ -25,6 +26,7 @@ function freshConversation(callerNumber) {
     awaiting: null,
     emergency: false,
     emergencyNotified: false,
+    greeted: false,
     completed: false,
     createdAt: now,
     updatedAt: now,
@@ -37,7 +39,11 @@ function freshConversation(callerNumber) {
  */
 export async function handleInboundMessage(
   { from, text, messageId = null, messageType = "text", timestamp = null },
-  { store, wa, config, templates }
+  // `context` is the routed business's own configuration, built by the
+  // webhook via businessContext(). It is never derived from the customer's
+  // message, and it is optional: without it every composed line is empty
+  // and the conversation behaves exactly as it did before.
+  { store, wa, config, templates, context = null }
 ) {
   /** Records one outbound message alongside sending it, capturing Meta's id. */
   const sendAndRecord = async (to, body, senderType, leadId = null) => {
@@ -92,10 +98,18 @@ export async function handleInboundMessage(
   const found = applyAwaitingFallback(text, conversation.awaiting, extractFields(text));
   conversation.fields = { ...found, ...conversation.fields }; // never overwrite an already-known field
 
+  // The business's own name for the owner, falling back to the
+  // deployment-wide value when no business context was routed in.
+  const ownerName = ownerNameFor(context, config.OWNER_NAME);
+
   if (isEmergency(text) && !conversation.emergency) {
     conversation.emergency = true;
     result.emergency = true;
-    await sendAndRecord(from, fillTemplate(templates._conversation.emergency_safety, [config.OWNER_NAME]), "assistant");
+    // No greeting on a safety message. Someone reporting sparking does
+    // not need an introduction first, and a conversation that opens this
+    // way never gets one — the register is already set.
+    conversation.greeted = true;
+    await sendAndRecord(from, fillTemplate(templates._conversation.emergency_safety, [ownerName]), "assistant");
 
     if (!conversation.emergencyNotified) {
       conversation.emergencyNotified = true;
@@ -129,6 +143,13 @@ export async function handleInboundMessage(
     conversation.awaiting = missing;
   }
 
+  // The business introduces itself once, on its first reply, and never
+  // again in the same conversation. Decided here so the flag is part of
+  // the state persisted below — otherwise a send failure would replay the
+  // greeting on the customer's next message.
+  const greeting = conversation.greeted ? "" : greetingLine(context);
+  if (!conversation.greeted) conversation.greeted = true;
+
   conversation.updatedAt = new Date().toISOString();
   await store.saveConversation(from, conversation);
   if (lead) await store.saveLead(lead);
@@ -137,7 +158,10 @@ export async function handleInboundMessage(
   if (lead) {
     await sendAndRecord(
       from,
-      fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", config.OWNER_NAME]),
+      compose(
+        greeting,
+        fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", ownerName])
+      ),
       "assistant",
       lead.id
     );
@@ -159,7 +183,20 @@ export async function handleInboundMessage(
     result.ownerNotified = ownerNotified;
   } else {
     const question = templates._conversation[QUESTION_KEY[missing]];
-    await sendAndRecord(from, fillTemplate(question, [conversation.fields.name || ""]), "assistant");
+    // Business context attaches to the question it belongs with: what we
+    // do when asking what's wrong, where we work when asking the area.
+    // Both are empty strings unless the business configured them, so a
+    // business that configures nothing sends exactly the message this
+    // product sent before any of this existed.
+    const detail = missing === "problem" ? servicesLine(context)
+      : missing === "area" ? areasLine(context)
+        : "";
+
+    await sendAndRecord(
+      from,
+      compose(greeting, fillTemplate(question, [conversation.fields.name || ""]), detail),
+      "assistant"
+    );
   }
 
   return result;

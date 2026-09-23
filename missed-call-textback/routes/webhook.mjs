@@ -1,5 +1,6 @@
 import { verifySignature } from "../lib/whatsapp.mjs";
 import { clientForBusiness, refusingClient } from "../lib/outbound.mjs";
+import { businessContext } from "../lib/businesses.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
@@ -152,7 +153,11 @@ export function handleWebhookPost(ctx, deps) {
 
             const result = await handleInboundMessage(
               { from, text: msg.text.body, messageId: msg.id, messageType: msg.type, timestamp: msg.timestamp },
-              { store: tenantStore, wa: tenantWa, config: tenantConfig, templates }
+              // The routed business's own configuration. Built from the
+              // business resolved by phone_number_id, so one tenant's
+              // services, areas or greeting can never reach another's reply.
+              { store: tenantStore, wa: tenantWa, config: tenantConfig, templates,
+                context: business ? businessContext(business) : null }
             );
             if (result.emergency) log("emergency_detected", { from });
             if (result.leadCompleted) {
