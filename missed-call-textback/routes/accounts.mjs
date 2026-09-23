@@ -11,6 +11,7 @@ import { resolveActor, can, isValidRole, isValidEmail, isAcceptablePassword, nor
 import { businessRecord, onboardingStatus } from "../lib/businesses.mjs";
 import { publicView, integrationState } from "../lib/integrations.mjs";
 import { VERIFIED_MESSAGE, FAILURE_MESSAGES } from "../lib/metaVerify.mjs";
+import { embeddedSignupConfig, signupMessage } from "../lib/embeddedSignup.mjs";
 import {
   signupPage, onboardingPage, whatsappSettingsPage, teamSettingsPage,
 } from "../lib/settingsViews.mjs";
@@ -18,6 +19,18 @@ import { log, logError } from "../lib/logger.mjs";
 import crypto from "node:crypto";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
+
+/**
+ * Where a signed-out visitor is sent.
+ *
+ * NOT `/login`: that route is POST-only, so redirecting a browser there
+ * produced a bare 404 for anyone who followed a settings link while
+ * signed out — including the "Connect WhatsApp" link this product now
+ * puts in front of every new customer. `/leads` renders the sign-in form
+ * (lib/views.mjs), which is what the landing page has always linked to
+ * for exactly the same reason.
+ */
+const SIGN_IN = "/leads";
 
 const formOf = (ctx) => new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
 
@@ -111,7 +124,7 @@ export async function handleOnboardingPost(ctx, deps) {
 
 export async function handleWhatsappSettingsGet(ctx, deps) {
   const actor = await actorFor(ctx, deps);
-  if (!actor) return redirect("/login");
+  if (!actor) return redirect(SIGN_IN);
 
   const business = deps.businesses?.byId(actor.businessId) ?? null;
   const integration = await deps.integrations.forBusiness(actor.businessId);
@@ -130,6 +143,13 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
       status: connection,
       onboarding: onboardingStatus(business ?? {}, { connection }),
       verification: verificationNotice(ctx.query?.get("v")),
+      // A Meta flow that didn't finish, as one of OUR sentences. The
+      // marker is looked up in a fixed table, so a crafted ?e= can only
+      // produce a message this codebase already contains.
+      failure: ctx.query?.get("e") ? signupMessage(ctx.query.get("e")) : null,
+      // The two public identifiers the browser needs to open Meta's flow,
+      // plus whether it can be opened at all. No secret is in here.
+      signup: embeddedSignupConfig(deps.config ?? {}),
       canManage: can(actor.role, "manageSettings"),
       role: actor.role,
       actor,
@@ -146,7 +166,7 @@ function verificationNotice(code) {
 
 export async function handleWhatsappSettingsPost(ctx, deps) {
   const actor = await actorFor(ctx, deps);
-  if (!actor) return redirect("/login");
+  if (!actor) return redirect(SIGN_IN);
 
   if (!can(actor.role, "manageSettings")) {
     log("settings_change_denied", { role: actor.role });
@@ -221,7 +241,7 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
 
 export async function handleTeamGet(ctx, deps) {
   const actor = await actorFor(ctx, deps);
-  if (!actor) return redirect("/login");
+  if (!actor) return redirect(SIGN_IN);
 
   const memberships = await deps.accounts.membersOf(actor.businessId);
   const members = [];
@@ -238,7 +258,7 @@ export async function handleTeamGet(ctx, deps) {
 
 export async function handleTeamPost(ctx, deps) {
   const actor = await actorFor(ctx, deps);
-  if (!actor) return redirect("/login");
+  if (!actor) return redirect(SIGN_IN);
 
   if (!can(actor.role, "manageTeam")) {
     log("team_change_denied", { role: actor.role });

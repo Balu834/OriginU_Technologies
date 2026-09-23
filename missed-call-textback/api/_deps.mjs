@@ -11,6 +11,7 @@ import { loadBusinessRegistry } from "../lib/businesses.mjs";
 import { createIntegrationService } from "../lib/integrations.mjs";
 import { createAccountService } from "../lib/users.mjs";
 import { createMetaVerifier } from "../lib/metaVerify.mjs";
+import { embeddedSignupConfig, createEmbeddedSignupClient } from "../lib/embeddedSignup.mjs";
 import { createBillingService } from "../lib/billing.mjs";
 import { createUsageService } from "../lib/usage.mjs";
 import { razorpayConfig, createRazorpayClient } from "../lib/razorpay.mjs";
@@ -45,9 +46,23 @@ export async function getRequestDeps() {
   const businesses = await loadBusinessRegistry(base.store, base.config);
   const integrations = createIntegrationService(base.store, base.config);
   const accounts = createAccountService(base.store);
+  // Null unless this deployment's Meta app is configured for Embedded
+  // Signup — the settings page reads the same condition and offers
+  // Advanced Setup rather than a button that cannot complete.
+  const signup = embeddedSignupConfig(base.config);
+  const embeddedSignup = signup.available
+    ? createEmbeddedSignupClient({
+        appId: signup.appId,
+        appSecret: base.config.META_APP_SECRET,
+        graphVersion: signup.graphVersion,
+        registerPin: base.config.WHATSAPP_REGISTER_PIN,
+      })
+    : null;
+
   return {
     ...base, businesses, integrations, accounts,
     metaVerifier: createMetaVerifier(),
+    embeddedSignup,
     billing: createBillingService(base.store),
     usage: createUsageService(base.store),
     razorpay: razorpayConfig(process.env),

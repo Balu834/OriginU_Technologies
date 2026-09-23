@@ -60,6 +60,24 @@ const STYLES = `
   .bar { height:6px; margin-top:6px; background:var(--line); border-radius:3px; overflow:hidden; }
   .bar span { display:block; height:100%; background:var(--accent); }
 
+  .btn-link { display:inline-block; margin-top:18px; min-height:46px; line-height:46px; padding:0 20px;
+              font-size:15px; font-weight:600; border-radius:3px; background:var(--accent);
+              color:var(--accent-ink); text-decoration:none; }
+  .btn-link.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  /* Side by side where there's room, stacked on a phone. */
+  .actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .actions form { margin:0; }
+  .actions button, .actions .btn-link { margin-top:0; }
+  .connected-card { border-color:var(--accent); }
+  details.advanced { padding:0; }
+  details.advanced > summary { padding:16px 20px; cursor:pointer; font-family:var(--mono); font-size:11px;
+                               letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  details.advanced[open] > summary { border-bottom:1px solid var(--line); }
+  .advanced-body { padding:18px 20px 20px; }
+  .warn { margin:0 0 16px; padding:10px 12px; font-size:13.5px; border-radius:2px;
+          border-left:3px solid var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent);
+          color:var(--muted); }
+
   table { width:100%; border-collapse:collapse; font-size:15px; }
   th { text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.12em;
        text-transform:uppercase; color:var(--muted); padding:0 0 8px; font-weight:400; }
@@ -160,9 +178,34 @@ export function onboardingPage({ error } = {}) {
     </form>`, "", { bare: true });
 }
 
+/**
+ * The WhatsApp page a business owner actually sees.
+ *
+ * The brief this was rebuilt from is worth restating, because it is a
+ * product decision the markup has to keep: a plumber connecting his
+ * WhatsApp must never be asked for a phone number id, an access token, an
+ * app secret or a webhook verify token. Those are Meta implementation
+ * details, and asking a customer to fetch them from the Meta developer
+ * dashboard is not onboarding, it is homework.
+ *
+ * So the main screen has exactly one control — Connect WhatsApp, which
+ * runs Meta's own Embedded Signup — and the six-field form still exists,
+ * unchanged, behind "Advanced setup" for the technical administrator who
+ * genuinely needs it.
+ *
+ * Two things this page refuses to do:
+ *
+ * 1. Fake the button. When this deployment's Meta app is not configured
+ *    for Embedded Signup, `signup.available` is false and the page says
+ *    so plainly, because a button that opens an empty popup is a worse
+ *    answer than an honest sentence.
+ * 2. Invent a status. Everything shown comes from the persisted
+ *    integration record handed in by the route.
+ */
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
-  error, verification = null, business: shellBusiness = null, actor = null,
+  error, verification = null, failure = null, signup = null,
+  business: shellBusiness = null, actor = null,
 } = {}) {
   const connected = status === "CONNECTED";
 
@@ -177,26 +220,85 @@ export function whatsappSettingsPage({
        </div>`
     : "";
 
-  const current = integration
-    ? `<div class="card">
-         <dl class="facts">
-           <dt>Status</dt><dd><span class="state ${escapeHtml(status)}">${escapeHtml(status)}</span></dd>
-           <dt>Phone</dt><dd>${escapeHtml(integration.displayPhoneNumber || "—")}</dd>
-           <dt>Number ID</dt><dd>${escapeHtml(integration.phoneNumberId)}</dd>
-           <dt>WABA ID</dt><dd>${escapeHtml(integration.wabaId || "—")}</dd>
-           <dt>Verified</dt><dd>${escapeHtml(integration.lastVerifiedAt || "never")}</dd>
-           ${integration.lastError ? `<dt>Last error</dt><dd>${escapeHtml(integration.lastError)}</dd>` : ""}
-         </dl>
+  // A failed or abandoned Meta flow, arriving back as a ?e= marker. The
+  // sentence is one of ours; a raw Graph error never reaches this page.
+  const failureNotice = failure
+    ? `<div class="card" style="margin-bottom:12px;border-color:var(--urgent)">
+         <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">WhatsApp connection wasn't completed.</h2>
+         <p class="hint" style="margin:0 0 12px">${escapeHtml(failure)}</p>
+         <div class="actions">
+           <a class="btn-link" href="/settings/whatsapp">Try again</a>
+           <a class="btn-link ghost" href="#advanced">Advanced setup</a>
+         </div>
        </div>`
-    : `<div class="card">
-         <dl class="facts">
-           <dt>Status</dt><dd><span class="state NOT_CONNECTED">NOT_CONNECTED</span></dd>
-         </dl>
-         <p class="hint" style="margin-top:12px">
-           WhatsApp automation is unavailable until an integration is connected.
-           Leads can't be captured yet.
+    : "";
+
+  // -------------------------------------------------- the main screen
+
+  const success = `
+    <div class="card connected-card">
+      <h2 style="font-family:var(--display);font-size:20px;margin:0 0 4px">✓ WhatsApp Connected</h2>
+      <p class="hint" style="margin:0 0 16px">Your WhatsApp Business number is ready.</p>
+      <dl class="facts">
+        <dt>Business</dt><dd>${escapeHtml(business?.name || "—")}</dd>
+        <dt>WhatsApp</dt><dd>${escapeHtml(integration?.displayPhoneNumber || "Connected number")}</dd>
+        <dt>Status</dt><dd><span class="state CONNECTED">Connected</span></dd>
+      </dl>
+      ${canManage
+        ? `<div class="actions">
+             <form method="POST" action="/settings/whatsapp/test">
+               <button type="submit">Test Connection</button>
+             </form>
+             <a class="btn-link ghost" href="/dashboard">Continue to Dashboard</a>
+           </div>`
+        : `<p class="hint" style="margin-top:14px">Your role (${escapeHtml(role || "STAFF")}) can view this connection but not change it.</p>`}
+    </div>`;
+
+  // Not connected. One button, no jargon, and an honest explanation when
+  // the button genuinely cannot work yet.
+  const connectCard = `
+    <div class="card">
+      <h2 style="font-family:var(--display);font-size:20px;margin:0 0 4px">Connect your WhatsApp Business account</h2>
+      <p class="hint" style="margin:0 0 16px">
+        Automatically follow up with customers when you miss their calls and capture
+        new leads through WhatsApp.
+      </p>
+      ${!canManage
+        ? `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>`
+        : signup?.available
+          ? `<button type="button" id="connect-whatsapp" class="full">Connect WhatsApp</button>
+             <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
+             <p class="hint" id="connect-recover" hidden>
+               <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
+             </p>
+             <p class="hint">Securely connect your WhatsApp Business account through Meta.</p>
+             <noscript>
+               <p class="hint">Connecting through Meta needs JavaScript. Use Advanced setup below instead.</p>
+             </noscript>`
+          : `<p class="hint" style="margin:0">
+               One-click connection isn't switched on for this deployment yet, so there is
+               nothing here that could complete a connection. Use Advanced setup below, or
+               contact support.
+             </p>`}
+      ${errorBlock(error)}
+    </div>`;
+
+  // A stored-but-unproven or rejected connection. Says which, and what to
+  // do about it, without showing anything technical.
+  const interim = !connected && integration
+    ? `<div class="card">
+         <p class="hint" style="margin:0 0 10px">
+           ${status === "ERROR"
+             ? "Meta didn't accept this connection the last time it was checked."
+             : "This connection is saved but hasn't been confirmed by Meta yet."}
          </p>
-       </div>`;
+         ${canManage
+           ? `<form method="POST" action="/settings/whatsapp/test" style="display:inline">
+                <button type="submit">Test Connection</button>
+              </form>`
+           : ""}
+       </div>`
+    : "";
 
   const steps = onboarding
     ? `<ul class="steps">
@@ -206,13 +308,28 @@ export function whatsappSettingsPage({
        </ul>`
     : "";
 
-  const form = canManage
-    ? `<form class="card" method="POST" action="/settings/whatsapp">
-         <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Connect WhatsApp</h2>
-         <p class="hint" style="margin:0 0 4px">
-           From your Meta app: WhatsApp → API Setup. These are sent straight to the server,
-           stored encrypted, and never shown again.
-         </p>
+  // ------------------------------------------------ advanced / manual
+  //
+  // Unchanged in every field name and in what it does. It moved behind a
+  // disclosure and gained a warning; it did not lose a capability, and the
+  // technical facts about the current connection live here too rather than
+  // on a screen meant for someone who has never seen a Meta dashboard.
+
+  const technical = integration
+    ? `<dl class="facts" style="margin-bottom:16px">
+         <dt>Status</dt><dd><span class="state ${escapeHtml(status)}">${escapeHtml(status)}</span></dd>
+         <dt>Phone</dt><dd>${escapeHtml(integration.displayPhoneNumber || "—")}</dd>
+         <dt>Number ID</dt><dd>${escapeHtml(integration.phoneNumberId)}</dd>
+         <dt>WABA ID</dt><dd>${escapeHtml(integration.wabaId || "—")}</dd>
+         <dt>Verified</dt><dd>${escapeHtml(integration.lastVerifiedAt || "never")}</dd>
+         ${integration.lastError ? `<dt>Last error</dt><dd>${escapeHtml(integration.lastError)}</dd>` : ""}
+       </dl>`
+    : `<dl class="facts" style="margin-bottom:16px">
+         <dt>Status</dt><dd><span class="state NOT_CONNECTED">NOT_CONNECTED</span></dd>
+       </dl>`;
+
+  const manualForm = canManage
+    ? `<form method="POST" action="/settings/whatsapp">
          <label for="phoneNumberId">Phone number ID</label>
          <input id="phoneNumberId" name="phoneNumberId" required autocomplete="off">
          <label for="displayPhoneNumber">Display phone number</label>
@@ -232,14 +349,21 @@ export function whatsappSettingsPage({
            WhatsApp Business Account. Only Meta's answer can make this CONNECTED —
            a saved form is not a working connection.
          </p>
-         ${errorBlock(error)}
        </form>`
-    : `<div class="card">
-         <p class="hint" style="margin:0">
-           Your role (${escapeHtml(role || "STAFF")}) can view this but not change integration settings.
-         </p>
-         ${errorBlock(error)}
-       </div>`;
+    : "";
+
+  const advanced = `
+    <details class="card advanced" id="advanced"${failure ? " open" : ""}>
+      <summary>Need to connect manually? Advanced / Manual Setup</summary>
+      <div class="advanced-body">
+        <p class="warn">
+          Manual setup is intended for technical administrators. Most businesses
+          should use Connect WhatsApp.
+        </p>
+        ${technical}
+        ${manualForm}
+      </div>
+    </details>`;
 
   return page("WhatsApp settings", `
     <div class="masthead">
@@ -250,11 +374,134 @@ export function whatsappSettingsPage({
       <a class="backlink" href="/leads">Leads</a>
     </div>
     ${notice}
-    ${connected ? steps : `<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
-    ${current}
-    ${form}
-    ${settingsNav("/settings/whatsapp")}`, "",
+    ${failureNotice}
+    ${connected
+      ? `${success}${steps}`
+      : `${connectCard}${interim}<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
+    ${advanced}
+    ${settingsNav("/settings/whatsapp")}`,
+    canManage && signup?.available && !connected ? embeddedSignupScript(signup) : "",
     { active: "/settings/whatsapp", business: shellBusiness ?? business, actor });
+}
+
+/**
+ * The Embedded Signup client.
+ *
+ * It does three things and deliberately nothing else: open Meta's flow,
+ * catch the two pieces Meta hands back (the asset ids over postMessage,
+ * the exchangeable code in the login callback), and POST both to our
+ * server. It does not decide whether the connection worked — the server
+ * asks Meta that and answers with a redirect.
+ *
+ * Rules this code exists to keep:
+ *
+ * 1. Nothing is persisted in the browser. No localStorage, no
+ *    sessionStorage, no cookie of its own. The code lives in a closure
+ *    variable for the few seconds between callback and POST, and Meta
+ *    expires it in well under a minute anyway.
+ * 2. Nothing sensitive goes in a URL. The code is a POST body.
+ * 3. Messages are only trusted from Meta's own origins, and only in the
+ *    shape Embedded Signup documents.
+ * 4. Every failure path leaves the customer with a sentence and two ways
+ *    forward, never a raw error.
+ *
+ * Plain DOM code, no build step, matching the checkout client above.
+ */
+function embeddedSignupScript(signup) {
+  return `<script>
+(function () {
+  var btn = document.getElementById("connect-whatsapp");
+  if (!btn) return;
+  var out = document.getElementById("connect-status");
+  var recover = document.getElementById("connect-recover");
+  var CFG = ${jsonForScript({ appId: signup.appId, configId: signup.configId, version: signup.graphVersion })};
+  var assets = null;
+  var busy = false;
+
+  function say(msg) { if (out) { out.textContent = msg; out.hidden = false; } }
+  function fail(msg) {
+    busy = false;
+    btn.disabled = false;
+    say(msg);
+    if (recover) recover.hidden = false;
+  }
+
+  // Meta posts the selected WABA and business phone number into the window
+  // that opened the flow. Origin-checked, and only the documented shape is
+  // read — any other message on the page is ignored entirely.
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== "https://www.facebook.com" && ev.origin !== "https://web.facebook.com") return;
+    var data;
+    try { data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
+    if (!data || data.type !== "WA_EMBEDDED_SIGNUP") return;
+
+    if (data.event === "FINISH" || data.event === "FINISH_ONLY_WABA" || data.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
+      assets = {
+        phoneNumberId: (data.data && data.data.phone_number_id) || "",
+        wabaId: (data.data && data.data.waba_id) || ""
+      };
+    } else if (data.event === "CANCEL") {
+      fail("WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
+    }
+  });
+
+  function send(code) {
+    say("Finishing your connection\\u2026");
+    fetch("/settings/whatsapp/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ code: code, phoneNumberId: assets.phoneNumberId, wabaId: assets.wabaId })
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        var body = res.body || {};
+        if (res.ok && body.redirect) { location.assign(body.redirect); return; }
+        if (body.redirect) { location.assign(body.redirect); return; }
+        fail(body.error || "WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
+      })
+      .catch(function () {
+        fail("We couldn't reach the server to finish connecting. Try again in a moment.");
+      });
+  }
+
+  function onLogin(response) {
+    var code = response && response.authResponse && response.authResponse.code;
+    if (!code) {
+      fail("WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
+      return;
+    }
+    if (!assets || !assets.phoneNumberId || !assets.wabaId) {
+      fail("We couldn't find a WhatsApp Business number for this account. Finish creating your WhatsApp Business account with Meta, then try again.");
+      return;
+    }
+    send(code);
+  }
+
+  btn.addEventListener("click", function () {
+    if (busy) return;
+    if (!window.FB) {
+      fail("The Meta connection window couldn't load. Check your connection, then try again.");
+      return;
+    }
+    busy = true;
+    btn.disabled = true;
+    assets = null;
+    say("Opening Meta\\u2026");
+    window.FB.login(onLogin, {
+      config_id: CFG.configId,
+      response_type: "code",
+      override_default_response_type: true,
+      extras: { setup: {}, featureType: "", sessionInfoVersion: "3" }
+    });
+  });
+
+  window.fbAsyncInit = function () {
+    window.FB.init({ appId: CFG.appId, autoLogAppEvents: true, xfbml: true, version: CFG.version });
+  };
+}());
+</script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>`;
 }
 
 export function teamSettingsPage({ members = [], canManage = false, role = "", error, business = null, actor = null } = {}) {

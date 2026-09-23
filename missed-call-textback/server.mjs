@@ -25,6 +25,7 @@ import { loadBusinessRegistry } from "./lib/businesses.mjs";
 import { createIntegrationService } from "./lib/integrations.mjs";
 import { createAccountService } from "./lib/users.mjs";
 import { createMetaVerifier } from "./lib/metaVerify.mjs";
+import { embeddedSignupConfig, createEmbeddedSignupClient } from "./lib/embeddedSignup.mjs";
 import { createBillingService } from "./lib/billing.mjs";
 import { createUsageService } from "./lib/usage.mjs";
 import { razorpayConfig, createRazorpayClient } from "./lib/razorpay.mjs";
@@ -43,6 +44,19 @@ export function buildApp(config) {
   const wa = createWhatsAppClient(config);
   const baseDeps = { config, store, wa, templates };
 
+  // Only wired when the Meta app is actually configured for Embedded
+  // Signup. A null client is what makes the settings page offer Advanced
+  // Setup instead of a Connect button that could not complete.
+  const signup = embeddedSignupConfig(config);
+  const embeddedSignup = signup.available
+    ? createEmbeddedSignupClient({
+        appId: signup.appId,
+        appSecret: config.META_APP_SECRET,
+        graphVersion: signup.graphVersion,
+        registerPin: config.WHATSAPP_REGISTER_PIN,
+      })
+    : null;
+
   /** Dispatches one request via the shared route table (routes/router.mjs). */
   async function handle(ctx) {
     const deps = {
@@ -51,6 +65,7 @@ export function buildApp(config) {
       integrations: createIntegrationService(store, config),
       accounts: createAccountService(store),
       metaVerifier: createMetaVerifier(),
+      embeddedSignup,
       billing: createBillingService(store),
       usage: createUsageService(store),
       razorpay: rzpConfig,

@@ -105,24 +105,47 @@ function recentRow(lead) {
   </tr>`;
 }
 
-function checklist(onboarding) {
-  if (!onboarding || onboarding.ONBOARDING_COMPLETE) return "";
+/**
+ * "Get your business ready".
+ *
+ * Every row is evidence the product already holds: the profile fields,
+ * the stored services and areas, the PERSISTED integration status, and —
+ * for the last row — whether a lead has ever actually arrived. Nothing
+ * here can tick because a page was visited or a form was opened.
+ *
+ * Services and areas are shown as two rows because a business owner reads
+ * them as two jobs, but each is read straight off the business record;
+ * `onboardingStatus()` still owns the single AI_CONFIGURED answer it has
+ * always owned, and is not redefined to suit a layout.
+ */
+function checklist(onboarding, { business = null, hasLeads = false } = {}) {
+  if (!onboarding) return "";
   const steps = [
-    [onboarding.PROFILE_COMPLETE, "Add your business details", "/settings/business"],
-    [onboarding.AI_CONFIGURED, "List your services and areas", "/settings/business"],
+    [onboarding.PROFILE_COMPLETE, "Create your business", "/settings/business"],
+    [Boolean(business?.services?.length), "Add services", "/settings/business"],
+    [Boolean(business?.areas?.length), "Add service areas", "/settings/business"],
     [onboarding.WHATSAPP_CONNECTED, "Connect WhatsApp", "/settings/whatsapp"],
+    [hasLeads, "Test your first missed call", "/settings/whatsapp"],
   ];
   const done = steps.filter(([ok]) => ok).length;
+  if (done === steps.length) return "";
   const next = steps.find(([ok]) => !ok);
+
+  // The call to action follows the connection: connect it, then test it.
+  const action = onboarding.WHATSAPP_CONNECTED
+    ? ["Test WhatsApp", "/settings/whatsapp"]
+    : ["Connect WhatsApp", "/settings/whatsapp"];
 
   return `
   <section class="card setup" aria-labelledby="setup-h">
     <div class="rowbetween">
       <div>
-        <h2 id="setup-h">Finish setting up</h2>
-        <p class="muted" style="margin-top:4px">${done} of ${steps.length} done — leads can't be captured until WhatsApp is connected.</p>
+        <h2 id="setup-h">Get your business ready</h2>
+        <p class="muted" style="margin-top:4px">${done} of ${steps.length} done${
+          onboarding.WHATSAPP_CONNECTED ? "" : " — leads can't be captured until WhatsApp is connected"
+        }.</p>
       </div>
-      ${next ? `<a class="btn btn-primary" href="${next[2]}">Continue setup</a>` : ""}
+      <a class="btn btn-primary" href="${next ? action[1] : "/settings/whatsapp"}">${escapeHtml(action[0])}</a>
     </div>
     <ul class="steps">
       ${steps.map(([ok, label, href]) => `
@@ -133,6 +156,32 @@ function checklist(onboarding) {
         </li>`).join("")}
     </ul>
   </section>`;
+}
+
+/**
+ * The integration status card.
+ *
+ * Reads the persisted connection status, in both directions — a business
+ * whose WhatsApp works should be told so, not just one whose doesn't.
+ */
+function integrationCard(status) {
+  const connected = status === "CONNECTED";
+  return `
+  <div class="card" style="border-color:var(--${connected ? "line" : "accent"})">
+    <div class="rowbetween">
+      <div>
+        <h2>${connected ? "🟢 WhatsApp Connected" : "🟠 WhatsApp Setup Required"}</h2>
+        <p class="muted" style="margin-top:4px">${
+          connected
+            ? "Your missed-call follow-up is active."
+            : "Connect WhatsApp to start automatically following up with missed calls."
+        }</p>
+      </div>
+      <a class="btn ${connected ? "btn-ghost" : "btn-primary"}" href="/settings/whatsapp">${
+        connected ? "Manage WhatsApp" : "Connect WhatsApp"
+      }</a>
+    </div>
+  </div>`;
 }
 
 const EXTRA = `
@@ -205,18 +254,9 @@ export function overviewPage({
       </nav>
     </div>
 
-    ${whatsappStatus !== "CONNECTED" ? `
-      <div class="card" style="border-color:var(--accent)">
-        <div class="rowbetween">
-          <div>
-            <h2>WhatsApp isn't connected yet</h2>
-            <p class="muted" style="margin-top:4px">Connect WhatsApp to start capturing missed-call leads.</p>
-          </div>
-          <a class="btn btn-primary" href="/settings/whatsapp">Connect WhatsApp</a>
-        </div>
-      </div>` : ""}
+    ${integrationCard(whatsappStatus)}
 
-    ${checklist(onboarding)}
+    ${checklist(onboarding, { business, hasLeads: leads.length > 0 })}
 
     <div class="kpis">
       ${kpi("New leads", s.counts.new, "Need attention", s.counts.new ? "hot" : "")}

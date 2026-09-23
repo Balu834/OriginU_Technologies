@@ -73,6 +73,8 @@ missed call ──► WhatsApp template ──► conversation ──► lead �
 | `config.mjs` | Loads `.env`, applies defaults, reports missing required keys. |
 | `routes/` | One file per endpoint (`health`, `missedCall`, `webhook`), each a plain testable function. |
 | `lib/whatsapp.mjs` | WhatsApp Cloud API client + `X-Hub-Signature-256` verification. |
+| `lib/embeddedSignup.mjs` | Meta Embedded Signup: code exchange, number registration, WABA webhook subscription. The customer-facing way to connect WhatsApp. |
+| `routes/whatsappConnect.mjs` | `POST /settings/whatsapp/connect` (finish a signup) and `/settings/whatsapp/test` (re-prove a stored connection). |
 | `lib/conversation.mjs` | The state machine: one inbound message in, question/confirmation/notification out. |
 | `lib/extract.mjs` | Rule-based extraction of name/area/problem/urgency from free text. |
 | `lib/emergency.mjs` | Emergency keyword detection, shared in spirit with `../voice-agent`. |
@@ -111,6 +113,48 @@ npm start                # same as: node server.mjs
 npm test                 # node --test test/
 npm run demo             # simulated walkthrough, no credentials needed
 ```
+
+## How a customer connects their WhatsApp
+
+A business owner never handles a Meta credential. On `/settings/whatsapp`
+they see one button:
+
+```
+Connect WhatsApp  ──►  Meta's Embedded Signup popup
+                         │  customer signs in with Meta
+                         │  picks/creates their WhatsApp Business Account
+                         │  picks their business phone number
+                         ▼
+   Meta returns  waba_id + phone_number_id  (postMessage)
+                 exchangeable code          (FB.login callback)
+                         ▼
+   POST /settings/whatsapp/connect   (same-site session, JSON body)
+                         ▼
+   server: exchange code -> customer-scoped business token
+           register the number, subscribe our app to their WABA
+           store encrypted against THIS business
+           verify with Meta, and only then mark CONNECTED
+```
+
+The six technical fields (phone number ID, display number, WABA ID, access
+token, app secret, verify token) still exist, unchanged, behind **Advanced
+/ Manual Setup** on the same page — for a technical administrator, not for
+a customer.
+
+Requires `META_APP_ID` and `META_EMBEDDED_SIGNUP_CONFIG_ID`. Without them
+the page says one-click connection isn't available and offers Advanced
+setup; it never renders a button that cannot complete.
+
+Two things worth knowing:
+
+- **The app secret and verify token are platform-level, not per-business.**
+  Meta signs every webhook with the *app* secret, so a per-business one
+  would have nothing to verify. Embedded Signup therefore stores neither,
+  and `lib/integrations.mjs` keeps them empty for those connections.
+- **Only Meta can make a connection CONNECTED.** A completed popup is not
+  evidence. `lib/metaVerify.mjs` asks Meta whether the token reaches that
+  number and whether that WABA owns it, and its answer is what gets
+  recorded — the same rule the manual form has always followed.
 
 ## Meta setup (do this before demo day)
 

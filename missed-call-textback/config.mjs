@@ -46,6 +46,21 @@ export function loadConfig(env = process.env, dir = here) {
     META_WABA_ID: merged.META_WABA_ID ?? "",
     META_VERIFY_TOKEN: merged.META_VERIFY_TOKEN ?? "",
     META_APP_SECRET: merged.META_APP_SECRET ?? "",
+    // --- Embedded Signup (customer-facing "Connect WhatsApp") ---
+    // Both are public identifiers: the app id is sent to the browser by
+    // design, and the configuration id names which Facebook Login for
+    // Business configuration the popup should run. Without both, the
+    // settings page says so and offers Advanced Setup rather than
+    // rendering a button that cannot work.
+    META_APP_ID: merged.META_APP_ID ?? "",
+    META_EMBEDDED_SIGNUP_CONFIG_ID: merged.META_EMBEDDED_SIGNUP_CONFIG_ID ?? "",
+    // Graph version for the signup flow only; the send and verify paths
+    // keep their own pinned version.
+    META_GRAPH_VERSION: merged.META_GRAPH_VERSION ?? "",
+    // Two-step PIN used when registering a newly connected number for
+    // Cloud API. Unset means registration is skipped rather than a PIN
+    // being invented that nobody could reproduce later.
+    WHATSAPP_REGISTER_PIN: merged.WHATSAPP_REGISTER_PIN ?? "",
     MOHAMED_WHATSAPP_NUMBER: merged.MOHAMED_WHATSAPP_NUMBER ?? "",
     WEBHOOK_BASE_URL: merged.WEBHOOK_BASE_URL ?? "",
     MISSED_CALL_API_KEY: merged.MISSED_CALL_API_KEY ?? "",

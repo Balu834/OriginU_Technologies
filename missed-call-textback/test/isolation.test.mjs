@@ -238,7 +238,9 @@ test("a forged session id resolves to no actor at all", async () => {
 
   const result = await handleWhatsappSettingsGet(ctx({ session: forged }), w);
   assert.equal(result.status, 302);
-  assert.equal(result.headers.Location, "/login");
+  // Sent to the sign-in form, which lives at /leads. Not to /login: that
+  // route is POST-only, so redirecting a browser there was a bare 404.
+  assert.equal(result.headers.Location, "/leads");
 });
 
 test("a session whose membership was revoked stops resolving to that business", async () => {
@@ -250,7 +252,7 @@ test("a session whose membership was revoked stops resolving to that business", 
 
   assert.equal(await resolveActor(await w.store.getSession(session), w.accounts), null);
   const settings = await handleWhatsappSettingsGet(ctx({ session }), w);
-  assert.equal(settings.headers?.Location, "/login");
+  assert.equal(settings.headers?.Location, "/leads");
 
   // The dashboard must reach the same conclusion as the settings page.
   const dashboard = await handleDashboard(ctx({ pathname: "/leads", session }), w);

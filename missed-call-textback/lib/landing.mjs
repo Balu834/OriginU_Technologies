@@ -445,6 +445,7 @@ export function landingPage({ businessName = "", plans = null } = {}) {
       </div>
       <div class="grid g3">
         ${card(icon.chat, "Automatic WhatsApp follow-up", "Send a WhatsApp message when a customer call is missed.")}
+        ${card(icon.gear, "Easy WhatsApp Setup", "Connect your existing WhatsApp Business account securely through Meta. No API credentials to copy and paste.")}
         ${card(icon.list, "Automatic lead collection", "The conversation collects the customer's problem, area, name and how urgent it is.")}
         ${card(icon.list, "Lead dashboard", "See and manage every captured lead in one place.")}
         ${card(icon.bell, "Owner notifications", "Get a WhatsApp message when a new lead is ready.")}
@@ -558,7 +559,7 @@ export function landingPage({ businessName = "", plans = null } = {}) {
       ${faq("When does the WhatsApp message get sent?",
         "Right after the missed call is reported to us. Repeat calls from the same number within a short window don't trigger a second message, so nobody gets spammed.")}
       ${faq("Can I use my own WhatsApp number?",
-        "Yes. You connect your own WhatsApp Business number in settings, and we verify the credentials with Meta before marking the connection live. Messages go out from your number, not ours.")}
+        "Yes. Connect your WhatsApp Business account in a few clicks — you sign in with Meta, choose your number, and we confirm the connection with Meta before marking it live. Messages go out from your number, not ours.")}
       ${faq("What information does the system collect?",
         "The customer's problem, their area, their name and how urgent it is, plus the full conversation so you can see exactly what was said. It never quotes prices, diagnoses faults or promises appointment times.")}
       ${faq("Can I manage leads from my phone?",
