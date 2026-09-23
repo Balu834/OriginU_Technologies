@@ -67,7 +67,24 @@ export function publicView(integration) {
     createdAt: integration.createdAt,
     updatedAt: integration.updatedAt,
     lastVerifiedAt: integration.lastVerifiedAt,
+    // A machine-readable failure reason, never a credential — the settings
+    // page has to be able to say WHY a connection is in ERROR.
+    lastError: integration.lastError ?? null,
   };
+}
+
+/**
+ * The connection state of record.
+ *
+ * This reads the PERSISTED status field rather than re-deriving anything.
+ * State that is recomputed on each render can disagree with what was
+ * actually stored, and for this product the stored answer is the only one
+ * that means anything: CONNECTED exists solely to record that Meta was
+ * asked and said yes.
+ */
+export function integrationState(integration) {
+  if (!integration) return "NOT_CONNECTED";
+  return INTEGRATION_STATUSES.includes(integration.status) ? integration.status : "NOT_CONNECTED";
 }
 
 export function createIntegrationService(store, config) {
@@ -190,9 +207,47 @@ export function createIntegrationService(store, config) {
       return integration;
     },
 
+    /**
+     * Records that Meta confirmed these credentials.
+     *
+     * Only ever called from a real verification result — nothing in this
+     * codebase may call it because a form was submitted. The spread keeps
+     * businessId, phoneNumberId and the encrypted credentials exactly as
+     * they were: this transition records evidence, it does not edit the
+     * integration.
+     *
+     * A legacy env-backed integration is not stored anywhere, so there is
+     * nothing to persist to; it is returned unchanged rather than
+     * pretending the transition happened.
+     */
     async markVerified(integration, at = new Date().toISOString()) {
       if (!integration || integration._legacy) return integration;
-      const updated = { ...integration, status: "CONNECTED", lastVerifiedAt: at, updatedAt: at };
+      const updated = {
+        ...integration,
+        status: "CONNECTED",
+        lastVerifiedAt: at,
+        lastError: null,
+        updatedAt: at,
+      };
+      await store.saveIntegration(updated);
+      return updated;
+    },
+
+    /**
+     * Records that Meta rejected these credentials.
+     *
+     * `lastVerifiedAt` is deliberately left untouched: it means "the last
+     * time this was actually proven", and a later failure does not unmake
+     * a verification that really happened. The status is what changes.
+     */
+    async markVerificationFailed(integration, reason, at = new Date().toISOString()) {
+      if (!integration || integration._legacy) return integration;
+      const updated = {
+        ...integration,
+        status: "ERROR",
+        lastError: String(reason ?? "unknown"),
+        updatedAt: at,
+      };
       await store.saveIntegration(updated);
       return updated;
     },

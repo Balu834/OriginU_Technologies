@@ -10,6 +10,7 @@ import { createWhatsAppClient } from "../lib/whatsapp.mjs";
 import { loadBusinessRegistry } from "../lib/businesses.mjs";
 import { createIntegrationService } from "../lib/integrations.mjs";
 import { createAccountService } from "../lib/users.mjs";
+import { createMetaVerifier } from "../lib/metaVerify.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -41,7 +42,7 @@ export async function getRequestDeps() {
   const businesses = await loadBusinessRegistry(base.store, base.config);
   const integrations = createIntegrationService(base.store, base.config);
   const accounts = createAccountService(base.store);
-  return { ...base, businesses, integrations, accounts };
+  return { ...base, businesses, integrations, accounts, metaVerifier: createMetaVerifier() };
 }
 
 /**

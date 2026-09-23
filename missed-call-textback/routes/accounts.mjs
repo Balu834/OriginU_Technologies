@@ -8,8 +8,9 @@
  */
 import { currentSession, createSession, sessionCookie, loginRateLimited, COOKIE_NAME, parseCookies } from "../lib/auth.mjs";
 import { resolveActor, can, isValidRole, isValidEmail, isAcceptablePassword, normaliseEmail } from "../lib/users.mjs";
-import { businessRecord, connectionState, onboardingStatus } from "../lib/businesses.mjs";
-import { publicView } from "../lib/integrations.mjs";
+import { businessRecord, onboardingStatus } from "../lib/businesses.mjs";
+import { publicView, integrationState } from "../lib/integrations.mjs";
+import { VERIFIED_MESSAGE, FAILURE_MESSAGES } from "../lib/metaVerify.mjs";
 import {
   signupPage, onboardingPage, whatsappSettingsPage, teamSettingsPage,
 } from "../lib/settingsViews.mjs";
@@ -115,6 +116,10 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
   const business = deps.businesses?.byId(actor.businessId) ?? null;
   const integration = await deps.integrations.forBusiness(actor.businessId);
 
+  // The state shown is the state stored. It is not re-derived from the
+  // business record, and it is certainly not read back out of the markup.
+  const connection = integrationState(integration);
+
   return {
     status: 200,
     html: whatsappSettingsPage({
@@ -122,16 +127,20 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
       // Safe metadata only — publicView never carries a credential, not
       // even the ciphertext.
       integration: publicView(integration),
-      status: connectionState(business ?? {}, {
-        lastSuccessfulSendAt: integration?.lastVerifiedAt ?? null,
-      }),
-      onboarding: onboardingStatus(business ?? {}, {
-        lastSuccessfulSendAt: integration?.lastVerifiedAt ?? null,
-      }),
+      status: connection,
+      onboarding: onboardingStatus(business ?? {}, { connection }),
+      verification: verificationNotice(ctx.query?.get("v")),
       canManage: can(actor.role, "manageSettings"),
       role: actor.role,
     }),
   };
+}
+
+/** Turns the ?v= marker left by a redirect back into something readable. */
+function verificationNotice(code) {
+  if (!code) return null;
+  if (code === "ok") return { ok: true, message: VERIFIED_MESSAGE };
+  return { ok: false, message: FAILURE_MESSAGES[code] ?? "Verification failed." };
 }
 
 export async function handleWhatsappSettingsPost(ctx, deps) {
@@ -151,12 +160,15 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
     return { status: 400, html: whatsappSettingsPage({ error: "Phone number ID and access token are required." }) };
   }
 
+  const wabaId = (form.get("wabaId") ?? "").trim();
+  let integration;
+
   try {
-    await deps.integrations.register({
+    integration = await deps.integrations.register({
       // The business comes from the membership, never from the form.
       businessId: actor.businessId,
       phoneNumberId,
-      wabaId: (form.get("wabaId") ?? "").trim(),
+      wabaId,
       displayPhoneNumber: (form.get("displayPhoneNumber") ?? "").trim(),
       accessToken,
       appSecret: (form.get("appSecret") ?? "").trim(),
@@ -174,7 +186,34 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
     };
   }
 
-  return redirect("/settings/whatsapp");
+  // Now ask Meta whether any of this is true. The credentials are already
+  // stored — storing them is what lets the owner correct a typo — but the
+  // integration stays CONFIGURED until Meta itself confirms it, and moves
+  // to ERROR if Meta says no. Storing a credential is not evidence of
+  // anything, and this is the only place CONNECTED can come from.
+  if (!deps.metaVerifier) {
+    log("integration_verification_skipped", { businessId: actor.businessId, reason: "no verifier wired" });
+    return redirect("/settings/whatsapp");
+  }
+
+  const result = await deps.metaVerifier.verify({ phoneNumberId, wabaId, accessToken });
+
+  if (result.ok) {
+    await deps.integrations.markVerified(integration);
+    log("integration_verified", { businessId: actor.businessId });
+  } else {
+    await deps.integrations.markVerificationFailed(integration, result.reason);
+    // Meta's own code and message are API metadata, not credentials, and
+    // without them "verification failed" is undiagnosable.
+    log("integration_verification_failed", {
+      businessId: actor.businessId,
+      reason: result.reason,
+      metaCode: result.meta?.code ?? null,
+      metaMessage: result.meta?.message ?? null,
+    });
+  }
+
+  return redirect(`/settings/whatsapp?v=${encodeURIComponent(result.ok ? "ok" : result.reason)}`);
 }
 
 // --------------------------------------------------------- team settings

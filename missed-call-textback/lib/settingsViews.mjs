@@ -132,9 +132,21 @@ export function onboardingPage({ error } = {}) {
 }
 
 export function whatsappSettingsPage({
-  business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "", error,
+  business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
+  error, verification = null,
 } = {}) {
   const connected = status === "CONNECTED";
+
+  // `status` is the persisted integration state handed in by the route.
+  // Nothing on this page infers state from a class name or a rendered
+  // string — the markup reflects the record, never the other way round.
+  const notice = verification
+    ? `<div class="card" style="margin-bottom:12px">
+         <p class="hint" style="margin:0">
+           ${verification.ok ? "✓ " : "✕ "}${escapeHtml(verification.message)}
+         </p>
+       </div>`
+    : "";
 
   const current = integration
     ? `<div class="card">
@@ -144,6 +156,7 @@ export function whatsappSettingsPage({
            <dt>Number ID</dt><dd>${escapeHtml(integration.phoneNumberId)}</dd>
            <dt>WABA ID</dt><dd>${escapeHtml(integration.wabaId || "—")}</dd>
            <dt>Verified</dt><dd>${escapeHtml(integration.lastVerifiedAt || "never")}</dd>
+           ${integration.lastError ? `<dt>Last error</dt><dd>${escapeHtml(integration.lastError)}</dd>` : ""}
          </dl>
        </div>`
     : `<div class="card">
@@ -176,17 +189,19 @@ export function whatsappSettingsPage({
          <label for="displayPhoneNumber">Display phone number</label>
          <input id="displayPhoneNumber" name="displayPhoneNumber" placeholder="+91…" autocomplete="off">
          <label for="wabaId">WhatsApp Business Account ID</label>
-         <input id="wabaId" name="wabaId" autocomplete="off">
+         <input id="wabaId" name="wabaId" required autocomplete="off">
          <label for="accessToken">Access token</label>
          <input type="password" id="accessToken" name="accessToken" required autocomplete="off">
          <label for="appSecret">App secret</label>
          <input type="password" id="appSecret" name="appSecret" autocomplete="off">
          <label for="verifyToken">Verify token</label>
          <input type="password" id="verifyToken" name="verifyToken" autocomplete="off">
-         <button class="full" type="submit">Save integration</button>
+         <button class="full" type="submit">Save and verify</button>
          <p class="hint">
-           Saving stores the credentials as CONFIGURED. It stays CONFIGURED until a real
-           message is sent successfully — a saved form is not a working connection.
+           Saving stores the credentials, then asks Meta whether they actually work:
+           that the token reaches this number, and that this number belongs to that
+           WhatsApp Business Account. Only Meta's answer can make this CONNECTED —
+           a saved form is not a working connection.
          </p>
          ${errorBlock(error)}
        </form>`
@@ -205,7 +220,8 @@ export function whatsappSettingsPage({
       </div>
       <a class="backlink" href="/leads">Leads</a>
     </div>
-    ${connected ? "" : `<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
+    ${notice}
+    ${connected ? steps : `<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
     ${current}
     ${form}
     <p class="sub"><a href="/settings/team">Team settings</a></p>`);

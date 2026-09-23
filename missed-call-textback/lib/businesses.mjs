@@ -94,10 +94,17 @@ export function connectionState(business, evidence = {}) {
   return evidence.lastSuccessfulSendAt ? "CONNECTED" : "CONFIGURED";
 }
 
+/**
+ * `evidence.connection` is the PERSISTED integration status, and when it
+ * is supplied it wins. Deriving the connection from the business record
+ * instead was why "WhatsApp connected" could never tick: a self-service
+ * business keeps its number on its integration, not on its profile, so the
+ * derived answer was permanently NOT_CONNECTED no matter what Meta said.
+ */
 export function onboardingStatus(business, evidence = {}) {
   const profileComplete = Boolean(business?.name && business?.ownerName && business?.ownerWhatsApp);
   const aiConfigured = Boolean(business?.services?.length || business?.greeting);
-  const connection = connectionState(business, evidence);
+  const connection = evidence.connection ?? connectionState(business, evidence);
   return {
     PROFILE_COMPLETE: profileComplete,
     WHATSAPP_CONNECTED: connection === "CONNECTED",

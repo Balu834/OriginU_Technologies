@@ -24,6 +24,7 @@ import { createWhatsAppClient } from "./lib/whatsapp.mjs";
 import { loadBusinessRegistry } from "./lib/businesses.mjs";
 import { createIntegrationService } from "./lib/integrations.mjs";
 import { createAccountService } from "./lib/users.mjs";
+import { createMetaVerifier } from "./lib/metaVerify.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
@@ -45,6 +46,7 @@ export function buildApp(config) {
       businesses: await loadBusinessRegistry(store, config),
       integrations: createIntegrationService(store, config),
       accounts: createAccountService(store),
+      metaVerifier: createMetaVerifier(),
     };
     if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);
