@@ -9,25 +9,24 @@
  * against production data by hand, and this module exists so it cannot be
  * made again through the product.
  *
- * THE OWNERSHIP RULE, and its cost:
+ * THE OWNERSHIP RULE:
  *
  * A message is deleted only when `message.leadId === targetLeadId`. That
- * is the only evidence in this data model that ties a message to a lead,
- * and it is written at send time, so it cannot be wrong.
+ * is the only evidence this module will act on, and there is deliberately
+ * no timestamp or list-position reasoning anywhere in it.
  *
- * Messages with `leadId: null` are PRESERVED. In practice that is the
- * customer's own inbound texts and the assistant's questions, because
- * lib/conversation.mjs only stamps a lead id on the confirmation and the
- * owner alerts. They could be attributed by position in the list or by
- * timestamp, but both are inference, and a wrong inference here silently
- * destroys a different lead's transcript. Preserving them is the
- * conservative failure, and this module takes the conservative failure
- * every time.
+ * lib/conversation.mjs makes that evidence complete. Each run of a
+ * conversation carries a `runId`, every message is written with the run
+ * it belongs to, and when the run produces a lead those messages are
+ * stamped with its id — so the customer's own texts and the assistant's
+ * questions are attributed too, not just the confirmation and the owner
+ * alerts.
  *
- * That has a real consequence worth stating plainly: deleting a lead does
- * NOT currently erase the customer's message text. See the report notes —
- * the fix is to stamp `leadId` on every message once a lead completes,
- * which is a change to the write path, not to this one.
+ * Messages with `leadId: null` are still PRESERVED. That now means only
+ * the genuinely unattributable: records written before run ids existed,
+ * and runs that never produced a lead. A wrong guess here silently
+ * destroys a different lead's transcript, so this module takes the
+ * conservative failure every time.
  *
  * The conversation key and the transcript list are removed only when
  * nothing is left that depends on them: no other lead on that number, and

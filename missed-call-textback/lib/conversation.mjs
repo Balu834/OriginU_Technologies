@@ -5,6 +5,7 @@
  * signal fires. Kept as pure-ish functions over injected `deps` so it can
  * be tested without a real WhatsApp client or HTTP server.
  */
+import crypto from "node:crypto";
 import { isEmergency } from "./emergency.mjs";
 import { extractFields, applyAwaitingFallback, nextMissingField } from "./extract.mjs";
 import { createLead, formatOwnerNotification } from "./leads.mjs";
@@ -22,6 +23,12 @@ function freshConversation(callerNumber) {
   const now = new Date().toISOString();
   return {
     callerNumber,
+    // A stable id for THIS run of the conversation. Every message written
+    // during the run carries it, so when a lead is finally created the
+    // messages that belong to it can be named exactly — no ordering, no
+    // timestamps, no guessing.
+    runId: crypto.randomUUID(),
+    leadId: null,
     fields: {},
     awaiting: null,
     emergency: false,
@@ -31,6 +38,32 @@ function freshConversation(callerNumber) {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/**
+ * Stamps a lead id onto the messages of the run that produced it.
+ *
+ * The messages of a conversation are written before the lead exists —
+ * the customer answers four questions and only the last one completes it.
+ * Rather than guess afterwards which messages belonged to that lead, each
+ * message already carries the run id it was written under, so this names
+ * them exactly.
+ *
+ * Only messages of THIS run, and only ones not already attributed, are
+ * touched. A second lead from the same number runs under a different run
+ * id and is never reached by this.
+ */
+async function attributeRunToLead({ store, conversationId, runId, leadId }) {
+  if (!runId || !store.listMessages || !store.updateMessage) return 0;
+
+  const messages = await store.listMessages(conversationId);
+  let attributed = 0;
+  for (const message of messages) {
+    if (message.conversationRunId !== runId || message.leadId) continue;
+    await store.updateMessage({ ...message, leadId });
+    attributed++;
+  }
+  return attributed;
 }
 
 /**
@@ -45,6 +78,16 @@ export async function handleInboundMessage(
   // and the conversation behaves exactly as it did before.
   { store, wa, config, templates, context = null }
 ) {
+  const existing = await store.getConversation(from);
+  // A reply after the lead is already complete is a new job, not more
+  // detail for the old one — start clean rather than re-completing (and
+  // re-notifying the owner about) the same lead on every later message.
+  const conversation = !existing || existing.completed ? freshConversation(from) : existing;
+  // Conversations written before run ids existed have none; they stay
+  // null and their messages remain unattributable, which is the honest
+  // outcome rather than inventing an association after the fact.
+  const runId = conversation.runId ?? null;
+
   /** Records one outbound message alongside sending it, capturing Meta's id. */
   const sendAndRecord = async (to, body, senderType, leadId = null) => {
     const result = await wa.sendText(to, body);
@@ -52,6 +95,7 @@ export async function handleInboundMessage(
       await store.saveMessage(
         createMessage({
           conversationId: from,
+          conversationRunId: runId,
           leadId,
           direction: "outbound",
           senderType,
@@ -75,6 +119,7 @@ export async function handleInboundMessage(
     await store.saveMessage(
       createMessage({
         conversationId: from,
+        conversationRunId: runId,
         direction: "inbound",
         senderType: "customer",
         customerPhone: from,
@@ -86,11 +131,6 @@ export async function handleInboundMessage(
     );
   }
 
-  const existing = await store.getConversation(from);
-  // A reply after the lead is already complete is a new job, not more
-  // detail for the old one — start clean rather than re-completing (and
-  // re-notifying the owner about) the same lead on every later message.
-  const conversation = !existing || existing.completed ? freshConversation(from) : existing;
   const result = { emergency: false, leadCompleted: false };
 
   // Extract before the emergency check so a message like "the socket is
@@ -113,8 +153,12 @@ export async function handleInboundMessage(
 
     if (!conversation.emergencyNotified) {
       conversation.emergencyNotified = true;
+      // The partial lead is a formatting vehicle only — it is never
+      // stored. Stamping its id on the message would point at a lead that
+      // does not exist and can never be deleted, so this stays unassigned
+      // and is claimed by the backfill below if the lead completes.
       const partialLead = createLead({ callerNumber: from, fields: conversation.fields, emergency: true });
-      await sendAndRecord(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead), "owner", partialLead.id);
+      await sendAndRecord(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead), "owner", null);
     }
     // Fall through into the normal ask/complete flow below — the customer
     // still gets asked whatever's missing (or gets the confirmation, if
@@ -150,9 +194,16 @@ export async function handleInboundMessage(
   const greeting = conversation.greeted ? "" : greetingLine(context);
   if (!conversation.greeted) conversation.greeted = true;
 
+  // The explicit conversation-to-lead link, persisted alongside the run id
+  // the messages already carry.
+  if (lead) conversation.leadId = lead.id;
+
   conversation.updatedAt = new Date().toISOString();
   await store.saveConversation(from, conversation);
-  if (lead) await store.saveLead(lead);
+  if (lead) {
+    await store.saveLead(lead);
+    await attributeRunToLead({ store, conversationId: from, runId, leadId: lead.id });
+  }
 
   // Everything below is best-effort delivery. State is already durable.
   if (lead) {

@@ -32,6 +32,11 @@ export function normaliseMessageType(type) {
 export function createMessage({
   businessId = "",
   conversationId,
+  // Which run of the conversation this message belongs to. A customer
+  // rings more than once, so one conversationId spans several runs and
+  // each run becomes at most one lead. This is what makes ownership
+  // explicit instead of inferred from position or timestamp.
+  conversationRunId = null,
   leadId = null,
   direction,
   senderType,
@@ -48,6 +53,7 @@ export function createMessage({
     id: crypto.randomUUID(),
     businessId,
     conversationId,
+    conversationRunId,
     leadId,
     direction,
     senderType,
