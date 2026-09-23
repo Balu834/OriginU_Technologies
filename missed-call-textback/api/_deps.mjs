@@ -13,6 +13,7 @@ import { createAccountService } from "../lib/users.mjs";
 import { createMetaVerifier } from "../lib/metaVerify.mjs";
 import { createBillingService } from "../lib/billing.mjs";
 import { createUsageService } from "../lib/usage.mjs";
+import { razorpayConfig, createRazorpayClient } from "../lib/razorpay.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -49,6 +50,8 @@ export async function getRequestDeps() {
     metaVerifier: createMetaVerifier(),
     billing: createBillingService(base.store),
     usage: createUsageService(base.store),
+    razorpay: razorpayConfig(process.env),
+    razorpayClient: createRazorpayClient(razorpayConfig(process.env)),
   };
 }
 

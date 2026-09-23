@@ -23,6 +23,7 @@ import {
   handleWhatsappSettingsGet, handleWhatsappSettingsPost, handleTeamGet, handleTeamPost,
 } from "./accounts.mjs";
 import { handleBillingGet } from "./billing.mjs";
+import { handleCreateSubscription } from "./billingCheckout.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
@@ -47,6 +48,7 @@ const ROUTES = [
   ["GET", "/settings/whatsapp", handleWhatsappSettingsGet],
   ["POST", "/settings/whatsapp", handleWhatsappSettingsPost],
   ["GET", "/settings/billing", handleBillingGet],
+  ["POST", "/billing/create-subscription", handleCreateSubscription],
   ["GET", "/settings/team", handleTeamGet],
   ["POST", "/settings/team", handleTeamPost],
 ];

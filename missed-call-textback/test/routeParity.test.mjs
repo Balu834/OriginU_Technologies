@@ -37,9 +37,16 @@ test("every route in the dispatch table has a vercel.json rewrite", () => {
 });
 
 test("every browser rewrite points at the shared app function", () => {
-  // The three externally-called endpoints keep their own functions; every
-  // other path must go through the shared dispatcher.
-  const ownFunction = { "/health": "/api/health", "/missed-call": "/api/missed-call", "/webhook": "/api/webhook" };
+  // The externally-called endpoints keep their own functions — they are
+  // called by Meta, Razorpay and the phone automation, must read a raw
+  // body to verify a signature, and should not share a failure mode with
+  // the browser pages. Everything else goes through the shared dispatcher.
+  const ownFunction = {
+    "/health": "/api/health",
+    "/missed-call": "/api/missed-call",
+    "/webhook": "/api/webhook",
+    "/razorpay-webhook": "/api/razorpay-webhook",
+  };
 
   for (const [source, destination] of rewrites) {
     const expected = ownFunction[source] ?? "/api/app";

@@ -63,6 +63,10 @@ export function scopedToBusiness(store, businessId) {
     getSubscription: store.getSubscription?.bind(store),
     incrementUsage: store.incrementUsage?.bind(store),
     getUsage: store.getUsage?.bind(store),
+    saveProviderSubscription: store.saveProviderSubscription?.bind(store),
+    getBusinessByProviderSubscription: store.getBusinessByProviderSubscription?.bind(store),
+    claimOnce: store.claimOnce?.bind(store),
+    releaseClaim: store.releaseClaim?.bind(store),
     saveBusiness: store.saveBusiness,
     getBusiness: store.getBusiness,
     listBusinesses: store.listBusinesses,
@@ -256,6 +260,48 @@ export function createRedisStore(env = process.env) {
     async getSubscription(businessId) {
       const raw = await command('GET', 'subscription:' + businessId);
       return raw ? JSON.parse(raw) : null;
+    },
+
+    /**
+     * The authoritative provider -> tenant index.
+     *
+     * Webhook tenant identity is resolved through this and nothing else.
+     * Razorpay's `notes` can carry a business id for humans reading the
+     * dashboard, but notes travel with the payload and are not proof of
+     * anything; this mapping was written by us, server-side, at the
+     * moment we created the subscription.
+     */
+    async saveProviderSubscription(providerSubscriptionId, businessId) {
+      await command('SET', 'provider:razorpay:sub:' + providerSubscriptionId, businessId);
+    },
+    async getBusinessByProviderSubscription(providerSubscriptionId) {
+      if (!providerSubscriptionId) return null;
+      return (await command('GET', 'provider:razorpay:sub:' + providerSubscriptionId)) ?? null;
+    },
+
+    /**
+     * Claims a one-shot key, atomically. Returns true for the caller that
+     * won, false for every later (or concurrent) caller.
+     *
+     * SET NX is a single round trip that both tests and sets, so two
+     * simultaneous deliveries of the same webhook cannot both see "not
+     * processed yet" and both apply it — which a GET-then-SET would allow.
+     */
+    async claimOnce(key, ttlSeconds) {
+      const result = await command('SET', key, '1', 'EX', String(ttlSeconds), 'NX');
+      return result === 'OK';
+    },
+
+    /**
+     * Gives a claim back, for when the work after it failed.
+     *
+     * Without this, an event whose processing threw would stay claimed
+     * and every retry would be discarded as a duplicate — the failure
+     * would become permanent precisely because we were careful about
+     * duplicates.
+     */
+    async releaseClaim(key) {
+      await command('DEL', key);
     },
 
     /**

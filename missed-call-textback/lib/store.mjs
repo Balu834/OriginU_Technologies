@@ -31,6 +31,8 @@ const EMPTY = () => ({
   memberships: {},
   subscriptions: {},
   usage: {},
+  providerSubscriptions: {},
+  claims: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -176,6 +178,32 @@ export function createStore(filePath) {
     },
     async getSubscription(businessId) {
       return data.subscriptions[businessId] ?? null;
+    },
+
+    // The authoritative provider -> tenant index; see lib/store.redis.mjs.
+    async saveProviderSubscription(providerSubscriptionId, businessId) {
+      data.providerSubscriptions[providerSubscriptionId] = businessId;
+      persist();
+    },
+    async getBusinessByProviderSubscription(providerSubscriptionId) {
+      if (!providerSubscriptionId) return null;
+      return data.providerSubscriptions[providerSubscriptionId] ?? null;
+    },
+
+    // Mirrors the Redis SET NX. Test-and-set is one step here too, since
+    // this store is single-threaded and nothing can interleave.
+    async claimOnce(key, ttlSeconds) {
+      if (readExpiring(data.claims, key)) return false;
+      data.claims[key] = { value: 1, expiresAt: Date.now() + ttlSeconds * 1000 };
+      persist();
+      return true;
+    },
+
+    // Gives a claim back when the work after it failed, so a retry is not
+    // swallowed as a duplicate.
+    async releaseClaim(key) {
+      delete data.claims[key];
+      persist();
     },
 
     // Mirrors the Redis INCR: read and write are one step here because

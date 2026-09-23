@@ -64,6 +64,14 @@
     {
       "source": "/webhook",
       "destination": "/api/webhook"
+    },
+    {
+      "source": "/billing/create-subscription",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/razorpay-webhook",
+      "destination": "/api/razorpay-webhook"
     }
   ]
 }

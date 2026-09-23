@@ -292,6 +292,7 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
  */
 export function billingPage({
   business, subscription, entitlements, usage, plans = {}, role = "",
+  checkout = null,
 } = {}) {
   const plan = entitlements?.plan ?? "FREE";
   const limits = entitlements?.limits ?? {};
@@ -308,6 +309,18 @@ export function billingPage({
         ${unlimited ? "" : `<div class="bar"><span style="width:${pct}%"></span></div>`}
       </dd>`;
   };
+
+  // Checkout started but not yet confirmed by a webhook. The plan shown
+  // above is still the OLD one, because that is still what is true: a
+  // browser returning from Razorpay's widget proves nothing about whether
+  // money moved. Only the signed webhook changes the plan.
+  const pending = subscription?.pendingPlan && subscription.pendingPlan !== subscription.plan
+    ? `<div class="notice">
+         Payment for ${escapeHtml(subscription.pendingPlan)} is being confirmed.
+         Your plan stays ${escapeHtml(subscription.plan)} until the payment provider confirms it —
+         this page will show the new plan once that happens.
+       </div>`
+    : "";
 
   // A subscription nobody has chosen is described as exactly that.
   const planNote = subscription?.implicit
@@ -367,12 +380,35 @@ export function billingPage({
 
     <div class="card">
       <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Upgrade</h2>
-      <p class="hint" style="margin:0">
-        Payment integration is not connected yet, so plans cannot be changed from here.
-        Nothing on this page can charge you, and no upgrade can be completed online today.
-        ${role === "OWNER" ? "" : "Only the owner will be able to change the plan."}
-      </p>
+      ${upgradeBlock({ checkout, plan, role })}
     </div>
 
     <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`);
+}
+
+/**
+ * The upgrade call to action.
+ *
+ * Shows a real action ONLY when the server can actually sell the plan —
+ * that is, a payment provider and a configured price both exist. When
+ * they do not, it says so plainly instead of rendering a button that
+ * would fail, and it never quotes a price this codebase does not hold.
+ */
+function upgradeBlock({ checkout, plan, role }) {
+  if (plan !== "FREE") {
+    return `<p class="hint" style="margin:0">This business is on ${escapeHtml(plan)}.</p>`;
+  }
+  if (role !== "OWNER" && role !== "ADMIN") {
+    return `<p class="hint" style="margin:0">Only an owner or admin can change the plan.</p>`;
+  }
+  if (!checkout?.available) {
+    return `<p class="hint" style="margin:0">
+      Paid plans are not available yet — no price has been configured, so nothing here can charge you.
+    </p>`;
+  }
+  return `<form method="POST" action="/billing/create-subscription">
+      <input type="hidden" name="plan" value="PRO">
+      <button class="full" type="submit">Upgrade to PRO</button>
+      <p class="hint">You'll be taken to our payment provider. Your plan changes only after payment is confirmed.</p>
+    </form>`;
 }

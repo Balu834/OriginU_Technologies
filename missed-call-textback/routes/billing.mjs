@@ -2,16 +2,17 @@
  * GET /settings/billing — plan, usage and limits for the signed-in
  * business.
  *
- * Read-only on purpose. There is no POST, because there is nothing a
- * browser is allowed to change here: the plan is not a form field, and
- * until a payment provider is connected there is no trustworthy event
- * that could move a business onto a paid plan. A route that accepted
- * `plan=PRO` would be the whole vulnerability, so it does not exist.
+ * Read-only on purpose. The plan is not a form field here and never
+ * becomes one: starting checkout is a separate route that records an
+ * intention, and the only thing that grants a plan is the verified
+ * Razorpay webhook. A route that accepted `plan=PRO` would be the whole
+ * vulnerability, so it does not exist.
  */
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor } from "../lib/users.mjs";
 import { publicSubscription, PLAN_ENTITLEMENTS } from "../lib/billing.mjs";
 import { billingPage } from "../lib/settingsViews.mjs";
+import { isCheckoutConfigured, planIdFor } from "../lib/razorpay.mjs";
 
 export async function handleBillingGet(ctx, deps) {
   const session = await currentSession(ctx, deps.store);
@@ -38,6 +39,11 @@ export async function handleBillingGet(ctx, deps) {
       usage,
       plans: PLAN_ENTITLEMENTS,
       role: actor.role,
+      // An upgrade action is offered only when the server can genuinely
+      // complete one: provider configured AND a price configured.
+      checkout: {
+        available: isCheckoutConfigured(deps.razorpay) && Boolean(planIdFor(deps.razorpay, "PRO")),
+      },
     }),
   };
 }

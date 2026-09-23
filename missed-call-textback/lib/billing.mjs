@@ -1,12 +1,12 @@
 /**
  * Subscriptions and entitlements.
  *
- * There is no payment provider connected. Nothing here charges anyone,
- * and no code path can move a business to a paid plan in response to a
- * request — `changePlan` is a service method with no route, reachable
- * only from the server console. That is deliberate: the entitlement
- * system has to be trustworthy BEFORE money touches it, or connecting
- * Razorpay later means auditing both at once.
+ * `changePlan` has exactly two production callers: the verified Razorpay
+ * webhook (routes/razorpayWebhook.mjs) and the console script. No HTTP
+ * route reachable by a browser calls it, and no route accepts a plan
+ * parameter, so a customer cannot put themselves on a paid plan by
+ * asking. Opening checkout does not do it either — that only records an
+ * INTENT, and intent is not payment.
  *
  * The plan lives on the business, never on the session or the request.
  * A browser that sends plan=PRO is not refused, it is simply never read.
@@ -95,6 +95,7 @@ export function defaultSubscription(businessId, now = new Date().toISOString()) 
     providerSubscriptionId: null,
     currentPeriodStart: null,
     currentPeriodEnd: null,
+    pendingPlan: null,
     createdAt: now,
     updatedAt: now,
     // Marks a record that was assumed rather than stored, so the dashboard
@@ -113,6 +114,7 @@ export function subscriptionRecord({
   providerSubscriptionId = null,
   currentPeriodStart = null,
   currentPeriodEnd = null,
+  pendingPlan = null,
   createdAt = null,
   updatedAt = null,
 } = {}) {
@@ -131,6 +133,10 @@ export function subscriptionRecord({
     providerSubscriptionId,
     currentPeriodStart,
     currentPeriodEnd,
+    // The plan checkout was started for. Recorded server-side BEFORE the
+    // customer pays, so the webhook can learn which plan a payment is for
+    // without the payload telling it.
+    pendingPlan,
     createdAt: createdAt ?? now,
     updatedAt: updatedAt ?? now,
     implicit: false,
@@ -159,6 +165,7 @@ export function publicSubscription(subscription) {
     provider: subscription.provider,
     currentPeriodStart: subscription.currentPeriodStart,
     currentPeriodEnd: subscription.currentPeriodEnd,
+    pendingPlan: subscription.pendingPlan ?? null,
     implicit: Boolean(subscription.implicit),
   };
 }
@@ -213,12 +220,52 @@ export function createBillingService(store) {
         providerSubscriptionId: rest.providerSubscriptionId ?? existing?.providerSubscriptionId ?? null,
         currentPeriodStart: rest.currentPeriodStart ?? null,
         currentPeriodEnd: rest.currentPeriodEnd ?? null,
+        pendingPlan: rest.pendingPlan ?? existing?.pendingPlan ?? null,
         createdAt: existing?.createdAt ?? null,
         updatedAt: new Date().toISOString(),
       });
       record.changeReason = String(reason);
 
       await store.saveSubscription(record);
+      return record;
+    },
+
+    /**
+     * Records that checkout was STARTED for a plan. Grants nothing.
+     *
+     * This is the step that lets the webhook know which plan a later
+     * payment is for without trusting the payload to tell it. The
+     * business stays on whatever plan it already had — `pendingPlan` is
+     * an intention, and the entitlement resolver does not read it.
+     *
+     * It also writes the provider -> tenant index, which is the
+     * authoritative mapping the webhook resolves against.
+     */
+    async beginCheckout({ businessId, plan, providerSubscriptionId }) {
+      if (!businessId) throw new Error("beginCheckout requires a businessId");
+      if (!isValidPlan(plan) || plan === "FREE") throw new Error(`not a purchasable plan: ${plan}`);
+      if (!providerSubscriptionId) throw new Error("beginCheckout requires a provider subscription id");
+
+      const existing = await store.getSubscription?.(businessId);
+      const record = subscriptionRecord({
+        ...(existing && !existing.implicit ? existing : {}),
+        businessId,
+        // Unchanged: paying for PRO is what makes someone PRO.
+        plan: existing && !existing.implicit ? existing.plan : "FREE",
+        status: existing && !existing.implicit ? existing.status : "ACTIVE",
+        provider: "razorpay",
+        providerSubscriptionId,
+        providerCustomerId: existing?.providerCustomerId ?? null,
+        currentPeriodStart: existing?.currentPeriodStart ?? null,
+        currentPeriodEnd: existing?.currentPeriodEnd ?? null,
+        pendingPlan: plan,
+        createdAt: existing?.createdAt ?? null,
+        updatedAt: new Date().toISOString(),
+      });
+      record.changeReason = "checkout started";
+
+      await store.saveSubscription(record);
+      await store.saveProviderSubscription(providerSubscriptionId, businessId);
       return record;
     },
   };

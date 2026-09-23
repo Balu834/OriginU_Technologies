@@ -27,6 +27,7 @@ import { createAccountService } from "./lib/users.mjs";
 import { createMetaVerifier } from "./lib/metaVerify.mjs";
 import { createBillingService } from "./lib/billing.mjs";
 import { createUsageService } from "./lib/usage.mjs";
+import { razorpayConfig, createRazorpayClient } from "./lib/razorpay.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
@@ -37,6 +38,7 @@ import templates from "./templates.json" with { type: "json" };
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export function buildApp(config) {
+  const rzpConfig = razorpayConfig(process.env);
   const store = createStore(path.join(config.DATA_DIR, "db.json"));
   const wa = createWhatsAppClient(config);
   const baseDeps = { config, store, wa, templates };
@@ -51,6 +53,8 @@ export function buildApp(config) {
       metaVerifier: createMetaVerifier(),
       billing: createBillingService(store),
       usage: createUsageService(store),
+      razorpay: rzpConfig,
+      razorpayClient: createRazorpayClient(rzpConfig),
     };
     if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);
