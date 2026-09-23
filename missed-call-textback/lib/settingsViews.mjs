@@ -292,7 +292,7 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
  */
 export function billingPage({
   business, subscription, entitlements, usage, plans = {}, role = "",
-  checkout = null,
+  checkout = null, pricing = {},
 } = {}) {
   const plan = entitlements?.plan ?? "FREE";
   const limits = entitlements?.limits ?? {};
@@ -331,9 +331,12 @@ export function billingPage({
     ? `<p class="hint" style="margin:8px 0 0">This business is on ${escapeHtml(subscription.plan)} but its subscription is ${escapeHtml(subscription.status)}, so ${escapeHtml(subscription.effectivePlan)} limits apply.</p>`
     : "";
 
+  // Prices come from the server's pricing table via `pricing`; the view
+  // never computes or restates one.
   const comparison = Object.entries(plans).map(([name, p]) => `
     <tr${name === plan ? ' style="font-weight:600"' : ""}>
       <td>${escapeHtml(name)}${name === plan ? " (current)" : ""}</td>
+      <td>${escapeHtml(pricing?.[name]?.display ?? "")}</td>
       <td>${p.leadsPerMonth ?? "No limit"}</td>
       <td>${p.messagesPerMonth ?? "No limit"}</td>
       <td>${p.teamMembers ?? "No limit"}</td>
@@ -370,17 +373,17 @@ export function billingPage({
     <div class="card">
       <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Plans</h2>
       <table class="rows">
-        <thead><tr><th>Plan</th><th>Leads/mo</th><th>Messages/mo</th><th>Team</th></tr></thead>
+        <thead><tr><th>Plan</th><th>Price</th><th>Leads/mo</th><th>Messages/mo</th><th>Team</th></tr></thead>
         <tbody>${comparison}</tbody>
       </table>
       <p class="hint" style="margin:12px 0 0">
-        These limits are provisional and not yet a commercial offer.
+        Usage limits are provisional. Plans without a price are not available for purchase.
       </p>
     </div>
 
     <div class="card">
       <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Upgrade</h2>
-      ${upgradeBlock({ checkout, plan, role })}
+      ${upgradeBlock({ checkout, plan, role, pricing })}
     </div>
 
     <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`);
@@ -394,7 +397,7 @@ export function billingPage({
  * they do not, it says so plainly instead of rendering a button that
  * would fail, and it never quotes a price this codebase does not hold.
  */
-function upgradeBlock({ checkout, plan, role }) {
+function upgradeBlock({ checkout, plan, role, pricing = {} }) {
   if (plan !== "FREE") {
     return `<p class="hint" style="margin:0">This business is on ${escapeHtml(plan)}.</p>`;
   }
@@ -403,12 +406,19 @@ function upgradeBlock({ checkout, plan, role }) {
   }
   if (!checkout?.available) {
     return `<p class="hint" style="margin:0">
-      Paid plans are not available yet — no price has been configured, so nothing here can charge you.
+      Paid plans are not available online yet — the payment provider is not connected,
+      so nothing here can charge you.
     </p>`;
   }
-  return `<form method="POST" action="/billing/create-subscription">
-      <input type="hidden" name="plan" value="PRO">
-      <button class="full" type="submit">Upgrade to PRO</button>
+  // Only plans the server marks purchasable get a button. A plan with no
+  // decided price has nothing to put on one.
+  const buyable = (checkout.purchasable ?? []).filter((name) => pricing?.[name]?.display);
+  if (!buyable.length) {
+    return `<p class="hint" style="margin:0">No plan is currently available for purchase.</p>`;
+  }
+  return buyable.map((name) => `<form method="POST" action="/billing/create-subscription">
+      <input type="hidden" name="plan" value="${escapeHtml(name)}">
+      <button class="full" type="submit">Upgrade to ${escapeHtml(name)} — ${escapeHtml(pricing[name].display)}</button>
       <p class="hint">You'll be taken to our payment provider. Your plan changes only after payment is confirmed.</p>
-    </form>`;
+    </form>`).join("");
 }

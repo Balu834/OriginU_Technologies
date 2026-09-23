@@ -35,12 +35,16 @@ export function razorpayConfig(env = process.env) {
     keyId: env.RAZORPAY_KEY_ID ?? "",
     keySecret: env.RAZORPAY_KEY_SECRET ?? "",
     webhookSecret: env.RAZORPAY_WEBHOOK_SECRET ?? "",
-    // One Razorpay plan id per paid plan of ours. Server-side only: the
-    // browser never names a plan id, so it cannot subscribe itself to a
-    // cheaper plan than the one it asked for.
+    // One Razorpay plan id per plan we actually sell. Server-side only:
+    // the browser never names a plan id, so it cannot subscribe itself to
+    // a cheaper plan than the one it asked for.
+    //
+    // BUSINESS is deliberately absent. Its price has not been decided, so
+    // it is not purchasable, so there is nothing for a plan id to point
+    // at — and a variable that exists invites someone to fill it with a
+    // plan nobody has priced.
     planIds: {
       PRO: env.RAZORPAY_PLAN_ID_PRO ?? "",
-      BUSINESS: env.RAZORPAY_PLAN_ID_BUSINESS ?? "",
     },
   };
 }
@@ -198,7 +202,30 @@ export function createRazorpayClient(config, { fetchImpl = fetch } = {}) {
     return { ok: res.ok, status: res.status, body: parsed };
   }
 
+  async function get(path) {
+    let res;
+    try {
+      res = await fetchImpl(`${API_BASE}${path}`, {
+        headers: { Authorization: auth },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (err) {
+      logError("razorpay_unreachable", err, { path });
+      return { ok: false, status: 0, body: null };
+    }
+    const parsed = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, body: parsed };
+  }
+
   return {
+    /**
+     * Reads a plan back from Razorpay, so the amount we are about to
+     * charge can be checked against the amount we displayed.
+     */
+    fetchPlan(planId) {
+      return get(`/plans/${encodeURIComponent(planId)}`);
+    },
+
     /**
      * Creates a subscription against a server-configured plan id.
      *

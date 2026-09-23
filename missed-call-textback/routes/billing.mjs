@@ -10,7 +10,7 @@
  */
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor } from "../lib/users.mjs";
-import { publicSubscription, PLAN_ENTITLEMENTS } from "../lib/billing.mjs";
+import { publicSubscription, PLAN_ENTITLEMENTS, PLAN_PRICING, purchasablePlans, formatPrice } from "../lib/billing.mjs";
 import { billingPage } from "../lib/settingsViews.mjs";
 import { isCheckoutConfigured, planIdFor } from "../lib/razorpay.mjs";
 
@@ -41,8 +41,19 @@ export async function handleBillingGet(ctx, deps) {
       role: actor.role,
       // An upgrade action is offered only when the server can genuinely
       // complete one: provider configured AND a price configured.
+      // Prices come from the one server-side table; the view renders them
+      // and never computes one.
+      pricing: Object.fromEntries(
+        Object.keys(PLAN_ENTITLEMENTS).map((name) => [name, {
+          ...PLAN_PRICING[name],
+          display: formatPrice(name),
+        }])
+      ),
       checkout: {
-        available: isCheckoutConfigured(deps.razorpay) && Boolean(planIdFor(deps.razorpay, "PRO")),
+        available: isCheckoutConfigured(deps.razorpay),
+        // A plan is offered only if it is priced AND the provider has a
+        // plan id configured for it.
+        purchasable: purchasablePlans().filter((name) => Boolean(planIdFor(deps.razorpay, name))),
       },
     }),
   };

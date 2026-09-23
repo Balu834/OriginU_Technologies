@@ -43,11 +43,24 @@ const RZP = {
   planIds: { PRO: PRO_PLAN_ID, BUSINESS: "" },
 };
 
-/** Mocks Razorpay's subscription-create endpoint. */
-function mockRazorpayApi({ fail = false, id = SUB_A } = {}) {
+/**
+ * Mocks the two Razorpay endpoints checkout uses: reading the plan (to
+ * confirm the price) and creating the subscription.
+ *
+ * `calls` records only the subscription creations, so the existing
+ * assertions about what was sent stay about the thing being asserted.
+ */
+function mockRazorpayApi({ fail = false, id = SUB_A, amountPaise = 29900, currency = "INR", period = "monthly" } = {}) {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
-    calls.push({ url: String(url), auth: options.headers?.Authorization ?? "", body: JSON.parse(options.body ?? "{}") });
+    const href = String(url);
+
+    if (href.includes("/plans/")) {
+      if (fail) return { ok: false, status: 400, json: async () => ({ error: { description: "no such plan" } }) };
+      return { ok: true, status: 200, json: async () => ({ id: PRO_PLAN_ID, period, item: { amount: amountPaise, currency } }) };
+    }
+
+    calls.push({ url: href, auth: options.headers?.Authorization ?? "", body: JSON.parse(options.body ?? "{}") });
     if (fail) return { ok: false, status: 400, json: async () => ({ error: { code: "BAD_REQUEST_ERROR", description: "nope" } }) };
     return { ok: true, status: 200, json: async () => ({ id, status: "created", plan_id: options.body ? JSON.parse(options.body).plan_id : null }) };
   };
@@ -541,4 +554,103 @@ test("the checkout route is the only browser POST in the billing area, and it ca
   assert.equal(res.body.activated, false);
   assert.equal((await w.billing.getBusinessEntitlements(w.bizA.id)).plan, "FREE");
   assert.equal((await w.billing.getBusinessEntitlements(w.bizB.id)).plan, "FREE");
+});
+
+// ================================================= commercial config
+
+test("PRO is priced once, in paise, and the view never restates it", async () => {
+  const { PLAN_PRICING, formatPrice, purchasablePlans, isPurchasable } =
+    await import("../lib/billing.mjs");
+
+  assert.equal(PLAN_PRICING.PRO.amountPaise, 29900);
+  assert.equal(PLAN_PRICING.PRO.currency, "INR");
+  assert.equal(PLAN_PRICING.PRO.interval, "monthly");
+  assert.equal(formatPrice("PRO"), "₹299 / month");
+  assert.equal(formatPrice("FREE"), "Free");
+
+  // BUSINESS has no agreed price, so it is not sellable and says so.
+  assert.equal(PLAN_PRICING.BUSINESS.amountPaise, null);
+  assert.equal(formatPrice("BUSINESS"), "Price not set");
+  assert.equal(isPurchasable("BUSINESS"), false);
+  assert.equal(isPurchasable("FREE"), false);
+  assert.deepEqual(purchasablePlans(), ["PRO"]);
+
+  // The pricing table is frozen: nothing can mutate a price at runtime.
+  assert.throws(() => { PLAN_PRICING.PRO.amountPaise = 1; });
+});
+
+test("BUSINESS cannot be bought even when a plan id is somehow configured", async () => {
+  const w = await buildWorld({ razorpay: { ...RZP, planIds: { PRO: PRO_PLAN_ID, BUSINESS: "plan_SNEAKY" } } });
+  const session = await sessionFor(w, w.userA);
+
+  const res = await handleCreateSubscription(checkoutCtx(session, { plan: "BUSINESS" }), w);
+  assert.equal(res.status, 400);
+  assert.equal(w.api.calls.length, 0, "an unpriced plan reached the provider");
+  assert.equal((await w.billing.forBusiness(w.bizA.id)).implicit, true);
+});
+
+test("the entitlement limits are unchanged by adding pricing", async () => {
+  const { PLAN_ENTITLEMENTS } = await import("../lib/billing.mjs");
+  assert.deepEqual(PLAN_ENTITLEMENTS.FREE, {
+    leadsPerMonth: 25, messagesPerMonth: 250, teamMembers: 1, transcripts: true, prioritySupport: false,
+  });
+  assert.deepEqual(PLAN_ENTITLEMENTS.PRO, {
+    leadsPerMonth: 500, messagesPerMonth: 5000, teamMembers: 5, transcripts: true, prioritySupport: true,
+  });
+  assert.equal(PLAN_ENTITLEMENTS.BUSINESS.leadsPerMonth, null);
+});
+
+test("checkout refuses when the provider's price disagrees with ours", async () => {
+  const mismatched = {
+    calls: [],
+    fetchImpl: async (url, options = {}) => {
+      mismatched.calls.push(String(url));
+      if (String(url).includes("/plans/")) {
+        // Razorpay says ₹499 while we display ₹299.
+        return { ok: true, status: 200, json: async () => ({ id: PRO_PLAN_ID, period: "monthly", item: { amount: 49900, currency: "INR" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: SUB_A, status: "created" }) };
+    },
+  };
+  const w = await buildWorld({ api: mismatched });
+  const session = await sessionFor(w, w.userA);
+
+  const res = await handleCreateSubscription(checkoutCtx(session, { plan: "PRO" }), w);
+  assert.equal(res.status, 409);
+  assert.ok(!mismatched.calls.some((u) => u.endsWith("/subscriptions")), "a subscription was created at the wrong price");
+  assert.equal((await w.billing.forBusiness(w.bizA.id)).implicit, true);
+});
+
+test("checkout proceeds when the provider's price matches, and returns display info only", async () => {
+  const matching = {
+    calls: [],
+    fetchImpl: async (url, options = {}) => {
+      matching.calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+      if (String(url).includes("/plans/")) {
+        return { ok: true, status: 200, json: async () => ({ id: PRO_PLAN_ID, period: "monthly", item: { amount: 29900, currency: "INR" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: SUB_A, status: "created" }) };
+    },
+  };
+  const w = await buildWorld({ api: matching });
+  const session = await sessionFor(w, w.userA);
+
+  // Even if the browser insists on a different price, it is not read.
+  const res = await handleCreateSubscription(
+    checkoutCtx(session, { plan: "PRO", amountPaise: 100, amount: 1, currency: "USD", price: 1 }), w);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.amountPaise, 29900, "the browser changed the price");
+  assert.equal(res.body.currency, "INR");
+  assert.equal(res.body.displayPrice, "₹299 / month");
+  assert.equal(res.body.activated, false);
+
+  // Nothing secret came back.
+  const serialised = JSON.stringify(res.body);
+  assert.ok(!serialised.includes(KEY_SECRET));
+  assert.ok(!serialised.includes(WEBHOOK_SECRET));
+  assert.ok(serialised.includes(KEY_ID), "the public key id is required by checkout.js");
+
+  // Still FREE until a webhook says otherwise.
+  assert.equal((await w.billing.getBusinessEntitlements(w.bizA.id)).plan, "FREE");
 });

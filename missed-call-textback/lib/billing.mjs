@@ -79,6 +79,70 @@ export const METRIC_LIMITS = Object.freeze({
 });
 
 /**
+ * Commercial terms. THE single server-side source — no route, view or
+ * script restates a price, so there is one place to be wrong and one
+ * place to fix.
+ *
+ * `amountPaise` is in the smallest currency unit, as Razorpay expects,
+ * because carrying rupees as a float and converting at each boundary is
+ * how billing systems end up off by a paisa.
+ *
+ * IMPORTANT — what this amount is and is not: it is what we DISPLAY. The
+ * amount actually charged lives on the Razorpay Plan, created in their
+ * dashboard. These two can disagree, and if they ever do we must not
+ * take a customer's money at a price we did not show them, so checkout
+ * verifies the Razorpay plan's amount against this one before creating a
+ * subscription.
+ *
+ * `purchasable` is false wherever a price has not been decided. A plan
+ * with no agreed price cannot be sold, and inventing one to fill the
+ * field would be exactly the kind of thing nobody notices until a
+ * customer is charged it.
+ */
+export const PLAN_PRICING = Object.freeze({
+  FREE: Object.freeze({
+    amountPaise: 0,
+    currency: "INR",
+    interval: "monthly",
+    purchasable: false, // nothing to buy
+  }),
+  PRO: Object.freeze({
+    amountPaise: 29900, // ₹299
+    currency: "INR",
+    interval: "monthly",
+    purchasable: true,
+  }),
+  BUSINESS: Object.freeze({
+    // Not finalised. Until it is, BUSINESS is not offered for checkout
+    // and no Razorpay plan id is configured for it.
+    amountPaise: null,
+    currency: "INR",
+    interval: "monthly",
+    purchasable: false,
+  }),
+});
+
+/** Plans a customer may actually buy online, derived rather than restated. */
+export function purchasablePlans() {
+  return PLANS.filter((p) => PLAN_PRICING[p]?.purchasable && PLAN_PRICING[p]?.amountPaise > 0);
+}
+
+export function isPurchasable(plan) {
+  return purchasablePlans().includes(plan);
+}
+
+/** "₹299 / month", or an honest absence. Never invents a figure. */
+export function formatPrice(plan) {
+  const pricing = PLAN_PRICING[plan];
+  if (!pricing) return "";
+  if (pricing.amountPaise === 0) return "Free";
+  if (!pricing.amountPaise) return "Price not set";
+  const rupees = pricing.amountPaise / 100;
+  const amount = Number.isInteger(rupees) ? String(rupees) : rupees.toFixed(2);
+  return `₹${amount} / ${pricing.interval === "monthly" ? "month" : pricing.interval}`;
+}
+
+/**
  * The subscription every business has before anyone has paid for
  * anything. It is a real record shape rather than a null: code that asks
  * "what is this business entitled to" should never have to special-case

@@ -15,11 +15,8 @@
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
 import { isCheckoutConfigured, planIdFor, publicConfig } from "../lib/razorpay.mjs";
-import { isValidPlan } from "../lib/billing.mjs";
+import { isValidPlan, isPurchasable, PLAN_PRICING, formatPrice } from "../lib/billing.mjs";
 import { log, logError } from "../lib/logger.mjs";
-
-/** Plans a customer may buy. FREE is not purchasable; BUSINESS is sales-led for now. */
-const PURCHASABLE = new Set(["PRO"]);
 
 export async function handleCreateSubscription(ctx, deps) {
   const { store, billing, razorpay, razorpayClient } = deps;
@@ -43,10 +40,13 @@ export async function handleCreateSubscription(ctx, deps) {
   // WHICH of our plans it wants, but it can never name a Razorpay plan
   // id — that lookup happens here, against server configuration, so a
   // crafted request cannot subscribe to a cheaper plan than it displays.
+  // Purchasability is derived from the one pricing table, so a plan with
+  // no decided price cannot be bought no matter what is requested.
   const requested = String(readPlan(ctx) || "PRO").toUpperCase();
-  if (!isValidPlan(requested) || !PURCHASABLE.has(requested)) {
+  if (!isValidPlan(requested) || !isPurchasable(requested)) {
     return { status: 400, body: { error: "that plan cannot be purchased online" } };
   }
+  const pricing = PLAN_PRICING[requested];
 
   if (!isCheckoutConfigured(razorpay)) {
     return { status: 503, body: { error: "payments are not configured yet" } };
@@ -67,6 +67,34 @@ export async function handleCreateSubscription(ctx, deps) {
       status: 409,
       body: { error: "this business already has an active subscription", status: existing.status },
     };
+  }
+
+  // The price we show and the price Razorpay will charge are two
+  // different records, and a customer must never be charged an amount we
+  // did not display. Check them against each other before creating
+  // anything, and refuse on any disagreement rather than guessing which
+  // one is right.
+  const remotePlan = await razorpayClient.fetchPlan(planId);
+  if (!remotePlan.ok) {
+    logError("checkout_plan_unreadable", new Error(`status ${remotePlan.status}`), { plan: requested });
+    return { status: 502, body: { error: "could not confirm the price with the payment provider" } };
+  }
+  const remoteAmount = remotePlan.body?.item?.amount ?? null;
+  const remoteCurrency = remotePlan.body?.item?.currency ?? null;
+  const remotePeriod = remotePlan.body?.period ?? null;
+
+  if (remoteAmount !== pricing.amountPaise || remoteCurrency !== pricing.currency || remotePeriod !== "monthly") {
+    // Deliberately loud: this means the Razorpay dashboard and this
+    // codebase disagree about what the product costs.
+    logError("checkout_price_mismatch", new Error("configured price does not match the provider"), {
+      plan: requested,
+      expectedPaise: pricing.amountPaise,
+      providerPaise: remoteAmount,
+      expectedCurrency: pricing.currency,
+      providerCurrency: remoteCurrency,
+      providerPeriod: remotePeriod,
+    });
+    return { status: 409, body: { error: "the configured price does not match the payment provider" } };
   }
 
   const created = await razorpayClient.createSubscription({
@@ -99,7 +127,13 @@ export async function handleCreateSubscription(ctx, deps) {
       // public by design. The key secret and webhook secret never leave
       // the server.
       keyId: publicConfig(razorpay).keyId,
+      // Display information only, from the server's pricing table — the
+      // browser is told the price, it never tells us.
       plan: requested,
+      amountPaise: pricing.amountPaise,
+      currency: pricing.currency,
+      interval: pricing.interval,
+      displayPrice: formatPrice(requested),
       // Stated explicitly so no client can read this response as success.
       activated: false,
       message: "Subscription created. Your plan changes only after payment is confirmed.",
