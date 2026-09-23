@@ -4,6 +4,7 @@ import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification 
 import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
+import { integrationState } from "../lib/integrations.mjs";
 import { clientForBusiness } from "../lib/outbound.mjs";
 import { deleteLead } from "../lib/deleteLead.mjs";
 import { landingPage } from "../lib/landing.mjs";
@@ -50,11 +51,22 @@ export async function handleDashboard(ctx, deps) {
   if (!tenant) return noTenantResult(session);
 
   const leads = await tenant.store.listLeads();
+
+  // The persisted integration status, read exactly as Overview reads it
+  // (routes/overview.mjs) rather than re-derived here. It is used for one
+  // thing: deciding whether an empty leads list should explain itself by
+  // pointing at the unconnected WhatsApp. Never assumed connected — with
+  // no integration layer wired this resolves to NOT_CONNECTED, which is
+  // the truthful answer for a deployment that cannot send anything.
+  const integration = await deps.integrations?.forBusiness(tenant.actor.businessId);
+  const connection = integrationState(integration);
+
   return {
     status: 200,
     html: dashboardPage(leads, query, {
       deleted: ctx.query?.get("deleted") === "1",
       business: tenant.business, actor: tenant.actor,
+      whatsappStatus: connection,
     }),
   };
 }

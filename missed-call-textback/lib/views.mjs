@@ -117,6 +117,9 @@ const STYLES = `
   .empty { border:1px dashed var(--line); border-radius:4px; padding:52px 24px; text-align:center; }
   .empty .mark { font-family:var(--display); font-size:40px; color:var(--accent); line-height:1; }
   .empty p { margin:14px 0 0; color:var(--muted); font-size:15px; }
+  /* .btn is built to fill a row of actions on a lead card; standing alone
+     in an empty state it should size to its own label instead. */
+  .empty .btn { display:inline-flex; flex:0 0 auto; padding:0 22px; }
 
   /* ---- login ---- */
   .gate { max-width:370px; margin:14vh auto 0; }
@@ -518,7 +521,17 @@ function option(value, label, selected) {
   return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
 }
 
-export function dashboardPage(leads, query = {}, { deleted = false, business = null, actor = null } = {}) {
+/**
+ * `whatsappStatus` is the PERSISTED integration state, or null when the
+ * caller didn't resolve one. Null means unknown, and unknown says
+ * nothing: the empty state only explains itself with "WhatsApp isn't
+ * connected" when something actually looked and found that to be true.
+ * Defaulting either way would be this page inventing a connection status,
+ * which is the one thing it must never do.
+ */
+export function dashboardPage(
+  leads, query = {}, { deleted = false, business = null, actor = null, whatsappStatus = null } = {}
+) {
   const { q = "", status = "", urgency = "" } = query;
 
   const notice = deleted ? `<div class="flash">Lead deleted.</div>` : "";
@@ -528,11 +541,15 @@ export function dashboardPage(leads, query = {}, { deleted = false, business = n
   const urgentCount = sorted.filter((l) => leadPriority(l) === "URGENT").length;
   const filtering = Boolean(q || status || urgency);
 
-  const tally = sorted.length
-    ? filtering
+  // Empty deliberately counts nothing. The old "Nothing yet" ran straight
+  // on from the sentence before it ("...from your missed calls. Nothing
+  // yet") and then said the same thing again in the empty state two
+  // inches below. A count belongs on a page that has something to count.
+  const tally = !sorted.length
+    ? ""
+    : filtering
       ? `<b>${visible.length}</b> of ${sorted.length} shown`
-      : `<b>${sorted.length}</b> lead${sorted.length === 1 ? "" : "s"}${urgentCount ? ` &middot; <b>${urgentCount}</b> urgent` : ""}`
-    : "Nothing yet";
+      : `<b>${sorted.length}</b> lead${sorted.length === 1 ? "" : "s"}${urgentCount ? ` &middot; <b>${urgentCount}</b> urgent` : ""}`;
 
   const controls = sorted.length
     ? `<form class="filters" method="GET" action="/leads">
@@ -553,11 +570,22 @@ export function dashboardPage(leads, query = {}, { deleted = false, business = n
        </form>`
     : "";
 
+  // An empty list has two different meanings, and saying which is the
+  // whole point: nobody has replied yet, or nobody CAN reply because the
+  // WhatsApp number was never connected. The second is a problem the
+  // owner can fix in one click, and leaving them to guess is how a
+  // business concludes the product doesn't work.
+  const unconnected = whatsappStatus && whatsappStatus !== "CONNECTED";
+
   let body;
   if (!sorted.length) {
     body = `<div class="empty">
               <div class="mark">&#9889;</div>
-              <p>No leads yet.<br>They appear here the moment a customer replies.</p>
+              ${unconnected
+                ? `<p>No leads yet, and none can arrive until WhatsApp is connected.<br>
+                     That's the last step before your missed calls start following themselves up.</p>
+                   <p style="margin-top:18px"><a class="btn primary" href="/settings/whatsapp">Connect WhatsApp</a></p>`
+                : `<p>No leads yet.<br>They appear here the moment a customer replies.</p>`}
             </div>`;
   } else if (!visible.length) {
     body = `<div class="empty">
@@ -571,7 +599,7 @@ export function dashboardPage(leads, query = {}, { deleted = false, business = n
   // The masthead's own title and sign-out are gone: the shell carries both
   // now, and two sign-out buttons on one page is a trap.
   return page("Leads", `
-    <p class="sub" style="margin:0 0 18px">Every customer captured from your missed calls. ${tally}</p>
+    <p class="sub" style="margin:0 0 18px">Every customer captured from your missed calls.${tally ? ` ${tally}` : ""}</p>
     ${notice}
     ${controls}
     ${body}`,

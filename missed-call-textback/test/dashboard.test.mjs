@@ -32,6 +32,50 @@ test("cookies parse into a name/value map", () => {
   assert.deepEqual(parseCookies(undefined), {});
 });
 
+/**
+ * An empty leads list has two meanings and the page has to say which:
+ * nobody has replied yet, or nobody CAN reply because WhatsApp was never
+ * connected. Only the second gets a call to action, and only when the
+ * connection state was actually resolved — an unknown state must not be
+ * rendered as either answer.
+ */
+test("the empty leads page explains itself only when it knows WhatsApp isn't connected", () => {
+  const opts = { business: { name: "Planet" }, actor: { role: "OWNER" } };
+
+  const unconnected = dashboardPage([], {}, { ...opts, whatsappStatus: "NOT_CONNECTED" });
+  assert.match(unconnected, /none can arrive until WhatsApp is connected/);
+  assert.match(unconnected, /href="\/settings\/whatsapp"[^>]*>Connect WhatsApp</);
+
+  // Connected and simply quiet: no nagging, and no button to a step that
+  // is already done.
+  const connected = dashboardPage([], {}, { ...opts, whatsappStatus: "CONNECTED" });
+  assert.match(connected, /They appear here the moment a customer replies/);
+  assert.ok(!connected.includes(">Connect WhatsApp<"));
+
+  // Unknown: says nothing about a connection it never looked up.
+  const unknown = dashboardPage([], {}, opts);
+  assert.match(unknown, /They appear here the moment a customer replies/);
+  assert.ok(!unknown.includes(">Connect WhatsApp<"));
+
+  // And a page with leads on it is never an empty state, connected or not.
+  const withLeads = dashboardPage(
+    [{ id: "1", status: "new", createdAt: new Date().toISOString(), name: "Ravi", callerNumber: "+919876543210" }],
+    {}, { ...opts, whatsappStatus: "NOT_CONNECTED" }
+  );
+  assert.ok(!withLeads.includes("none can arrive until WhatsApp is connected"));
+});
+
+test("the leads subtitle never runs a count into the sentence when there is nothing to count", () => {
+  const opts = { business: { name: "Planet" }, actor: { role: "OWNER" } };
+  const sub = (html) => /<p class="sub"[^>]*>([\s\S]*?)<\/p>/.exec(html)[1].replace(/<[^>]+>/g, "").trim();
+
+  assert.equal(sub(dashboardPage([], {}, opts)), "Every customer captured from your missed calls.");
+  assert.match(
+    sub(dashboardPage([{ id: "1", status: "new", createdAt: new Date().toISOString() }], {}, opts)),
+    /missed calls\. 1 lead$/
+  );
+});
+
 test("dashboard shows the login form when there is no session", async () => {
   const deps = depsWithPassword();
   const res = await handleDashboard({ headers: {} }, deps);

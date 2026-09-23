@@ -109,6 +109,24 @@ export const SHELL_STYLES = `
   .burger span::before { transform:translateY(-5px); } .burger span::after { transform:translateY(3px); }
   .content { padding:26px 24px 72px; max-width:1180px; }
 
+  /*
+   * Pages that predate the shell wrap their body in .wrap, a 640px column
+   * centred with margin:0 auto and carrying its own padding. Inside the
+   * shell that column re-centred itself in an area the shell had already
+   * padded and left-aligned, so Leads and every settings page floated in
+   * the middle of the screen with their heading stranded at the far left,
+   * while Overview filled the space properly. Two pages of one product
+   * looked like two products.
+   *
+   * Neutralised here rather than in each page, so the shell owns page
+   * geometry in one place. The measure is kept - a form or a lead card
+   * stretched across 1180px is unreadable - but it starts where the
+   * heading starts. .wrap outside the shell (sign-in, signup, onboarding)
+   * is untouched and stays centred, which is right for a page with no
+   * sidebar to align to.
+   */
+  .content > .wrap { max-width:780px; margin:0; padding:0; }
+
   @media (max-width: 900px) {
     .app { grid-template-columns:1fr; }
     aside { position:fixed; inset:0 auto 0 0; width:min(84vw,300px); z-index:60;
