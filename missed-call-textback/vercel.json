@@ -80,6 +80,10 @@
     {
       "source": "/settings/business",
       "destination": "/api/app"
+    },
+    {
+      "source": "/lead/delete",
+      "destination": "/api/app"
     }
   ]
 }

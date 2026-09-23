@@ -88,6 +88,26 @@ export function createStore(filePath) {
         .map(([, lead]) => lead);
     },
 
+    // Deletion — mirrors lib/store.redis.mjs exactly.
+    async deleteLead(id, ns = "") {
+      delete data.leads[`${ns}${id}`];
+      persist();
+    },
+    async deleteMessage(messageId, conversationId, providerMessageId = null, ns = "") {
+      const listKey = `${ns}${conversationId}`;
+      if (data.messageIndex[listKey]) {
+        data.messageIndex[listKey] = data.messageIndex[listKey].filter((i) => i !== messageId);
+      }
+      delete data.messages[`${ns}${messageId}`];
+      if (providerMessageId) delete data.providerIndex[`${ns}${providerMessageId}`];
+      persist();
+    },
+    async deleteConversation(conversationId, ns = "") {
+      delete data.conversations[`${ns}${conversationId}`];
+      delete data.messageIndex[`${ns}${conversationId}`];
+      persist();
+    },
+
     // Transcript storage — mirrors lib/store.redis.mjs exactly, so tests
     // against this backend prove the same behaviour as production.
     async saveMessage(message, ns = "") {

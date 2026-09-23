@@ -16,7 +16,7 @@
 import { handleHealth } from "./health.mjs";
 import {
   handleLanding, handleDashboard, handleLeadDetail, handleLeadStatus,
-  handleLeadPriority, handleRetryNotification, handleLogin, handleLogout,
+  handleLeadPriority, handleRetryNotification, handleLeadDelete, handleLogin, handleLogout,
 } from "./dashboard.mjs";
 import {
   handleSignupGet, handleSignupPost, handleOnboardingGet, handleOnboardingPost,
@@ -30,7 +30,7 @@ import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./busines
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
-  "/lead/retry-notify", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
+  "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
   "/settings/business",
 ]);
 
@@ -42,6 +42,7 @@ const ROUTES = [
   ["POST", "/leads/status", handleLeadStatus],
   ["POST", "/lead/priority", handleLeadPriority],
   ["POST", "/lead/retry-notify", handleRetryNotification],
+  ["POST", "/lead/delete", handleLeadDelete],
   ["POST", "/login", handleLogin],
   ["POST", "/logout", handleLogout],
   ["GET", "/signup", handleSignupGet],

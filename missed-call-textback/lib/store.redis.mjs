@@ -43,6 +43,9 @@ export function scopedToBusiness(store, businessId) {
     listMessages: (cid) => store.listMessages(cid, ns),
     findMessageByProviderId: (pid) => store.findMessageByProviderId(pid, ns),
     updateMessage: (m) => store.updateMessage(m, ns),
+    deleteLead: (id) => store.deleteLead(id, ns),
+    deleteMessage: (id, cid, pid) => store.deleteMessage(id, cid, pid, ns),
+    deleteConversation: (cid) => store.deleteConversation(cid, ns),
     lastMissedCallAt: (n) => store.lastMissedCallAt(ns + n),
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
@@ -120,6 +123,35 @@ export function createRedisStore(env = process.env) {
       if (!ids.length) return [];
       const raws = await command("MGET", ...ids.map((id) => `lead:${ns}${id}`));
       return raws.filter(Boolean).map((r) => JSON.parse(r));
+    },
+
+    /**
+     * Removes one lead and its index entry. The index is updated first:
+     * an id in the index with no record behind it renders as a missing
+     * row, whereas a record with no index entry is invisible but still
+     * occupying its key.
+     */
+    async deleteLead(id, ns = "") {
+      await command("SREM", `${ns}leads:index`, id);
+      await command("DEL", `lead:${ns}${id}`);
+    },
+
+    /**
+     * Removes one message: the record, its position in the conversation's
+     * list, and the wamid lookup that points at it. `LREM ... 0` removes
+     * every occurrence, so a list that somehow gained a duplicate entry is
+     * cleaned rather than half-cleaned.
+     */
+    async deleteMessage(messageId, conversationId, providerMessageId = null, ns = "") {
+      await command("LREM", `${ns}messages:${conversationId}`, "0", messageId);
+      await command("DEL", `msg:${ns}${messageId}`);
+      if (providerMessageId) await command("DEL", `${ns}msgid:${providerMessageId}`);
+    },
+
+    /** Removes a conversation's state and its (by now empty) message list. */
+    async deleteConversation(conversationId, ns = "") {
+      await command("DEL", `conversation:${ns}${conversationId}`);
+      await command("DEL", `${ns}messages:${conversationId}`);
     },
 
     /**

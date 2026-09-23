@@ -142,6 +142,18 @@ const STYLES = `
   .undelivered { margin:0 0 12px; padding:9px 11px; font-size:13.5px; border-radius:0 3px 3px 0;
                  border-left:3px solid var(--urgent); background:var(--urgent-wash); color:var(--urgent); }
 
+  /* ---- destructive actions + flash ---- */
+  .flash { border-left:3px solid var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent);
+           padding:11px 14px; border-radius:0 3px 3px 0; font-size:14px; margin-bottom:16px; }
+  details.danger { margin-top:28px; border-top:1px solid var(--line); padding-top:16px; }
+  details.danger summary { cursor:pointer; font-family:var(--mono); font-size:11px; letter-spacing:.1em;
+                           text-transform:uppercase; color:var(--urgent); }
+  details.danger p { font-size:14px; margin:12px 0 0; }
+  details.danger form { margin-top:14px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  button.destructive { background:var(--urgent); color:var(--urgent-ink); border:0; border-radius:3px;
+                       min-height:44px; padding:0 18px; font-size:15px; font-weight:600; cursor:pointer; }
+  .cancel { font-size:14px; color:var(--muted); text-decoration:none; }
+
   /* ---- filters ---- */
   .filters { margin-bottom:20px; }
   .filters input[type=search] { width:100%; padding:11px 13px; font-size:16px; border:1px solid var(--line);
@@ -343,7 +355,7 @@ export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
  * the customer exchange — they were sent to the business, not to the
  * customer, and mixing them would misrepresent what the customer saw.
  */
-export function leadDetailPage(lead, messages = []) {
+export function leadDetailPage(lead, messages = [], { canDelete = false, role = "" } = {}) {
   const raw = String(lead.callerNumber ?? "");
   const digits = dialable(raw);
   const priority = leadPriority(lead);
@@ -446,16 +458,53 @@ export function leadDetailPage(lead, messages = []) {
       <h2>Conversation</h2>
       ${transcript}
     </section>
-    ${alerts}`);
+    ${alerts}
+    ${deleteControl(lead, canDelete, role)}`);
+}
+
+/**
+ * The delete control.
+ *
+ * Two steps, and both work without JavaScript: the button is inside a
+ * closed <details>, so it cannot be hit by a stray click, and the form
+ * carries `confirm=delete` which the server requires. The wording says
+ * "permanently" and "cannot be undone" because that is what happens —
+ * calling it "archive" would be a lie about a destructive action.
+ *
+ * It also states what is NOT removed. The customer's own messages are
+ * preserved when the data model cannot prove they belong to this lead,
+ * and an owner deleting a record for privacy reasons needs to know that
+ * rather than discover it later.
+ */
+function deleteControl(lead, canDelete, role) {
+  if (!canDelete) {
+    return role
+      ? `<p class="sub">Your role (${escapeHtml(role)}) cannot delete leads.</p>`
+      : "";
+  }
+  return `<details class="danger">
+      <summary>Delete this lead</summary>
+      <p>This permanently removes this lead and the messages recorded against it.
+         It cannot be undone.</p>
+      <p class="sub">The customer's own replies are kept when they cannot be proven to
+         belong only to this lead, so another lead from the same number stays intact.</p>
+      <form method="POST" action="/lead/delete">
+        <input type="hidden" name="id" value="${escapeHtml(lead.id)}">
+        <input type="hidden" name="confirm" value="delete">
+        <button type="submit" class="destructive">Delete permanently</button>
+        <a class="cancel" href="/leads">Cancel</a>
+      </form>
+    </details>`;
 }
 
 function option(value, label, selected) {
   return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
 }
 
-export function dashboardPage(leads, query = {}) {
+export function dashboardPage(leads, query = {}, { deleted = false } = {}) {
   const { q = "", status = "", urgency = "" } = query;
 
+  const notice = deleted ? `<div class="flash">Lead deleted.</div>` : "";
   const sorted = [...leads].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
   const visible = filterLeads(sorted, { q, status, urgency });
 
@@ -510,6 +559,7 @@ export function dashboardPage(leads, query = {}) {
       </div>
       <form class="signout" method="POST" action="/logout"><button type="submit">Sign out</button></form>
     </div>
+    ${notice}
     ${controls}
     ${body}`);
 }

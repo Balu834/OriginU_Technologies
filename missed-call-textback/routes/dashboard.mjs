@@ -3,8 +3,9 @@ import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
 import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
 import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
-import { resolveActor } from "../lib/users.mjs";
+import { resolveActor, can } from "../lib/users.mjs";
 import { clientForBusiness } from "../lib/outbound.mjs";
+import { deleteLead } from "../lib/deleteLead.mjs";
 import { landingPage } from "../lib/landing.mjs";
 import { log } from "../lib/logger.mjs";
 
@@ -35,7 +36,10 @@ export async function handleDashboard(ctx, deps) {
   if (!tenant) return noTenantResult(session);
 
   const leads = await tenant.store.listLeads();
-  return { status: 200, html: dashboardPage(leads, query) };
+  return {
+    status: 200,
+    html: dashboardPage(leads, query, { deleted: ctx.query?.get("deleted") === "1" }),
+  };
 }
 
 /**
@@ -95,7 +99,13 @@ export async function handleLeadDetail(ctx, deps) {
   // Older leads predate transcript storage; an empty list renders a plain
   // note rather than inventing history that was never recorded.
   const messages = tenant.store.listMessages ? await tenant.store.listMessages(lead.callerNumber) : [];
-  return { status: 200, html: leadDetailPage(lead, messages) };
+  return {
+    status: 200,
+    html: leadDetailPage(lead, messages, {
+      canDelete: can(tenant.actor.role, "manageSettings"),
+      role: tenant.actor.role,
+    }),
+  };
 }
 
 /**
@@ -255,6 +265,61 @@ export async function handleRetryNotification(ctx, deps) {
   log(ownerNotified ? "notification_retry_succeeded" : "notification_retry_failed", { leadId: id });
 
   return { status: 302, headers: { Location: `/lead?id=${encodeURIComponent(id)}` }, body: {} };
+}
+
+/**
+ * POST /lead/delete — permanently removes one lead.
+ *
+ * A POST rather than a GET because it changes state, and the session
+ * cookie is `SameSite=Strict`, which is this project's existing CSRF
+ * convention for every other mutating route (`/leads/status`,
+ * `/lead/priority`, `/lead/retry-notify`). A `confirm=delete` field is
+ * required on top, so a stray or replayed POST cannot destroy data on its
+ * own.
+ *
+ * The business is resolved from the session's membership. `businessId`,
+ * `tenantId` and `ownerId` in the body are not validated — they are never
+ * read. A lead belonging to another tenant is reported as 404, because
+ * "403 Forbidden" would confirm that the id exists.
+ */
+export async function handleLeadDelete(ctx, deps) {
+  const session = await currentSession(ctx, deps.store);
+  if (!session) return { status: 401, body: { error: "not signed in" } };
+
+  const tenant = await tenantFor(session, deps);
+  if (!tenant) return { status: 403, body: { error: "no business for this account" } };
+
+  // Deleting a customer's record is an owner/admin action.
+  if (!can(tenant.actor.role, "manageSettings")) {
+    log("lead_delete_denied", { role: tenant.actor.role });
+    return { status: 403, body: { error: "your role cannot delete leads" } };
+  }
+
+  const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
+  const id = form.get("id") ?? "";
+  if (form.get("confirm") !== "delete") {
+    return { status: 400, body: { error: "deletion must be confirmed" } };
+  }
+
+  const result = await deleteLead({
+    store: tenant.store,
+    businessId: tenant.actor.businessId,
+    leadId: id,
+    actor: tenant.actor,
+  });
+
+  if (!result.deleted) {
+    // Already gone, never existed, or belongs to someone else — all
+    // indistinguishable from here, deliberately. Repeating a delete is
+    // safe and lands here.
+    return { status: 404, body: { error: "lead not found" } };
+  }
+
+  return {
+    status: 302,
+    headers: { Location: "/leads?deleted=1" },
+    body: {},
+  };
 }
 
 /** POST /login — verifies the password and starts a session. */
