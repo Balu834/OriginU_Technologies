@@ -11,6 +11,8 @@ import { loadBusinessRegistry } from "../lib/businesses.mjs";
 import { createIntegrationService } from "../lib/integrations.mjs";
 import { createAccountService } from "../lib/users.mjs";
 import { createMetaVerifier } from "../lib/metaVerify.mjs";
+import { createBillingService } from "../lib/billing.mjs";
+import { createUsageService } from "../lib/usage.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -42,7 +44,12 @@ export async function getRequestDeps() {
   const businesses = await loadBusinessRegistry(base.store, base.config);
   const integrations = createIntegrationService(base.store, base.config);
   const accounts = createAccountService(base.store);
-  return { ...base, businesses, integrations, accounts, metaVerifier: createMetaVerifier() };
+  return {
+    ...base, businesses, integrations, accounts,
+    metaVerifier: createMetaVerifier(),
+    billing: createBillingService(base.store),
+    usage: createUsageService(base.store),
+  };
 }
 
 /**

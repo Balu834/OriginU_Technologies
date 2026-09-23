@@ -25,6 +25,8 @@ import { loadBusinessRegistry } from "./lib/businesses.mjs";
 import { createIntegrationService } from "./lib/integrations.mjs";
 import { createAccountService } from "./lib/users.mjs";
 import { createMetaVerifier } from "./lib/metaVerify.mjs";
+import { createBillingService } from "./lib/billing.mjs";
+import { createUsageService } from "./lib/usage.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
 import { handleMissedCall } from "./routes/missedCall.mjs";
@@ -47,6 +49,8 @@ export function buildApp(config) {
       integrations: createIntegrationService(store, config),
       accounts: createAccountService(store),
       metaVerifier: createMetaVerifier(),
+      billing: createBillingService(store),
+      usage: createUsageService(store),
     };
     if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);

@@ -20,6 +20,7 @@
  */
 const MISSED_CALL_TTL_SECONDS = 10 * 60; // matches routes/missedCall.mjs's dedupe window
 const PROCESSED_MESSAGE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days is far beyond any realistic Meta retry window
+const USAGE_TTL_SECONDS = 400 * 24 * 60 * 60; // comfortably longer than any billing period we report on
 
 /**
  * Scopes a store to one business. Tenant isolation is structural: the
@@ -58,6 +59,10 @@ export function scopedToBusiness(store, businessId) {
     getIntegrationByBusiness: store.getIntegrationByBusiness?.bind(store),
     getIntegrationByPhoneNumberId: store.getIntegrationByPhoneNumberId?.bind(store),
     releasePhoneNumberMapping: store.releasePhoneNumberMapping?.bind(store),
+    saveSubscription: store.saveSubscription?.bind(store),
+    getSubscription: store.getSubscription?.bind(store),
+    incrementUsage: store.incrementUsage?.bind(store),
+    getUsage: store.getUsage?.bind(store),
     saveBusiness: store.saveBusiness,
     getBusiness: store.getBusiness,
     listBusinesses: store.listBusinesses,
@@ -239,6 +244,35 @@ export function createRedisStore(env = process.env) {
       if (!ids.length) return [];
       const raws = await command('MGET', ...ids.map((i) => 'membership:' + i));
       return raws.filter(Boolean).map((x) => JSON.parse(x));
+    },
+
+    // Subscriptions and usage are deployment-wide records keyed BY business
+    // id, like integrations — a tenant must never be able to enumerate or
+    // edit another tenant's plan.
+    async saveSubscription(subscription) {
+      await command('SET', 'subscription:' + subscription.businessId, JSON.stringify(subscription));
+      await command('SADD', 'subscriptions:index', subscription.businessId);
+    },
+    async getSubscription(businessId) {
+      const raw = await command('GET', 'subscription:' + businessId);
+      return raw ? JSON.parse(raw) : null;
+    },
+
+    /**
+     * INCR is atomic, so two concurrent lambdas cannot lose a count the
+     * way a GET-then-SET would. The TTL is set only on first write, so a
+     * counter's lifetime does not slide forward with every increment.
+     */
+    async incrementUsage(key, by = 1) {
+      const total = await command('INCRBY', key, String(by));
+      if (Number(total) === Number(by)) {
+        await command('EXPIRE', key, String(USAGE_TTL_SECONDS));
+      }
+      return Number(total);
+    },
+    async getUsage(key) {
+      const raw = await command('GET', key);
+      return raw ? Number(raw) : 0;
     },
 
     async hasProcessedMessage(id) {

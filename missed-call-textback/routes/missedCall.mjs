@@ -73,6 +73,39 @@ export async function handleMissedCall(ctx, deps) {
 
   log("missed_call_received", { callerNumber: caller });
 
+  // Entitlement check BEFORE the billable send. The business comes from
+  // the API key that authenticated this request, so a caller cannot ask
+  // for someone else's allowance, and no plan value is read from the
+  // request at all.
+  //
+  // This is the gate for the whole product: a missed call is what starts
+  // a conversation that becomes a lead. Enforcing here, rather than
+  // mid-conversation, means a business that hits its limit stops starting
+  // NEW conversations instead of going silent on a customer who is
+  // already mid-reply.
+  if (business && deps.billing && deps.usage) {
+    const entitlements = await deps.billing.getBusinessEntitlements(business.id);
+    const allowance = await deps.usage.check(business.id, "messages", entitlements);
+    if (!allowance.allowed) {
+      // Nothing is sent and nothing is recorded — no half-finished state
+      // that looks to the owner like the customer was contacted.
+      log("missed_call_over_limit", {
+        businessId: business.id, plan: entitlements.plan,
+        used: allowance.used, limit: allowance.limit,
+      });
+      return {
+        status: 402,
+        body: {
+          sent: false,
+          error: "monthly message limit reached for this plan",
+          plan: entitlements.plan,
+          used: allowance.used,
+          limit: allowance.limit,
+        },
+      };
+    }
+  }
+
   // The template goes out on this business's own integration. Without one
   // there is nothing legitimate to send with: falling back to the shared
   // client would text this business's customer from a different
@@ -95,6 +128,13 @@ export async function handleMissedCall(ctx, deps) {
   }
 
   await store.markMissedCall(caller, Date.now());
+
+  // Counted only now, after Meta accepted it. A failed send returned
+  // above without reaching this line — the business got nothing, so it is
+  // not usage.
+  if (business && deps.usage) {
+    await deps.usage.record(business.id, "messages", 1);
+  }
 
   log("whatsapp_template_sent", { callerNumber: caller, template: config.WHATSAPP_MISSED_CALL_TEMPLATE });
   return { status: 200, body: { sent: true, template: config.WHATSAPP_MISSED_CALL_TEMPLATE } };

@@ -57,6 +57,9 @@ const STYLES = `
   .steps li.done { color:var(--ink); }
   .steps li.done::before { content:"●"; color:var(--accent); }
 
+  .bar { height:6px; margin-top:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .bar span { display:block; height:100%; background:var(--accent); }
+
   table { width:100%; border-collapse:collapse; font-size:15px; }
   th { text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.12em;
        text-transform:uppercase; color:var(--muted); padding:0 0 8px; font-weight:400; }
@@ -277,4 +280,99 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
       </table>
     </div>
     ${addForm}`);
+}
+
+/**
+ * Plan, usage and limits.
+ *
+ * Every number here comes from a stored counter or the entitlement
+ * table — there are no placeholder figures, and no plan is shown as
+ * active unless the subscription record says so. When nobody has chosen
+ * a plan the page says exactly that rather than implying FREE was picked.
+ */
+export function billingPage({
+  business, subscription, entitlements, usage, plans = {}, role = "",
+} = {}) {
+  const plan = entitlements?.plan ?? "FREE";
+  const limits = entitlements?.limits ?? {};
+
+  const meter = (metric, limitKey, label) => {
+    const used = usage?.counts?.[metric] ?? 0;
+    const limit = limits[limitKey];
+    const unlimited = limit === null || limit === undefined;
+    const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+    return `
+      <dt>${escapeHtml(label)}</dt>
+      <dd>
+        ${used} ${unlimited ? "used (no limit on this plan)" : `of ${limit} this month`}
+        ${unlimited ? "" : `<div class="bar"><span style="width:${pct}%"></span></div>`}
+      </dd>`;
+  };
+
+  // A subscription nobody has chosen is described as exactly that.
+  const planNote = subscription?.implicit
+    ? `<p class="hint" style="margin:8px 0 0">No plan has been selected for this business, so it runs on the default FREE entitlements.</p>`
+    : "";
+
+  const degraded = subscription && subscription.plan !== subscription.effectivePlan
+    ? `<p class="hint" style="margin:8px 0 0">This business is on ${escapeHtml(subscription.plan)} but its subscription is ${escapeHtml(subscription.status)}, so ${escapeHtml(subscription.effectivePlan)} limits apply.</p>`
+    : "";
+
+  const comparison = Object.entries(plans).map(([name, p]) => `
+    <tr${name === plan ? ' style="font-weight:600"' : ""}>
+      <td>${escapeHtml(name)}${name === plan ? " (current)" : ""}</td>
+      <td>${p.leadsPerMonth ?? "No limit"}</td>
+      <td>${p.messagesPerMonth ?? "No limit"}</td>
+      <td>${p.teamMembers ?? "No limit"}</td>
+    </tr>`).join("");
+
+  return page("Billing", `
+    <div class="masthead">
+      <div>
+        <h1>Billing</h1>
+        <div class="sub">${escapeHtml(business?.name ?? "")}</div>
+      </div>
+      <a class="backlink" href="/leads">Leads</a>
+    </div>
+
+    <div class="card">
+      <dl class="facts">
+        <dt>Current plan</dt><dd><span class="state CONFIGURED">${escapeHtml(plan)}</span></dd>
+        <dt>Subscription status</dt><dd>${escapeHtml(subscription?.status ?? "ACTIVE")}</dd>
+        <dt>Billing period</dt>
+        <dd>${escapeHtml((usage?.periodStart ?? "").slice(0, 10))} to ${escapeHtml((usage?.periodEnd ?? "").slice(0, 10))}</dd>
+      </dl>
+      ${planNote}
+      ${degraded}
+    </div>
+
+    <div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Usage this month</h2>
+      <dl class="facts">
+        ${meter("leads", "leadsPerMonth", "Leads")}
+        ${meter("messages", "messagesPerMonth", "WhatsApp messages")}
+      </dl>
+    </div>
+
+    <div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Plans</h2>
+      <table class="rows">
+        <thead><tr><th>Plan</th><th>Leads/mo</th><th>Messages/mo</th><th>Team</th></tr></thead>
+        <tbody>${comparison}</tbody>
+      </table>
+      <p class="hint" style="margin:12px 0 0">
+        These limits are provisional and not yet a commercial offer.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 8px">Upgrade</h2>
+      <p class="hint" style="margin:0">
+        Payment integration is not connected yet, so plans cannot be changed from here.
+        Nothing on this page can charge you, and no upgrade can be completed online today.
+        ${role === "OWNER" ? "" : "Only the owner will be able to change the plan."}
+      </p>
+    </div>
+
+    <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`);
 }

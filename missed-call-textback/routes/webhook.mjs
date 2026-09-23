@@ -155,7 +155,16 @@ export function handleWebhookPost(ctx, deps) {
               { store: tenantStore, wa: tenantWa, config: tenantConfig, templates }
             );
             if (result.emergency) log("emergency_detected", { from });
-            if (result.leadCompleted) log("lead_completed", { from, leadId: result.lead?.id });
+            if (result.leadCompleted) {
+              log("lead_completed", { from, leadId: result.lead?.id });
+              // Metered, not gated. A redelivery never reaches this line —
+              // the idempotency check above drops it — so Meta's retries
+              // cannot inflate the count. Deliberately no limit check
+              // here: refusing mid-conversation would strand a customer
+              // who has already answered our questions, and discard a lead
+              // the business has effectively already earned.
+              if (business && deps.usage) await deps.usage.record(business.id, "leads", 1);
+            }
           } catch (err) {
             logError("message_processing_error", err, {});
           }

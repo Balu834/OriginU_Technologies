@@ -29,6 +29,8 @@ const EMPTY = () => ({
   users: {},
   userByEmail: {},
   memberships: {},
+  subscriptions: {},
+  usage: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -166,6 +168,25 @@ export function createStore(filePath) {
     },
     async listMembershipsByBusiness(businessId) {
       return Object.values(data.memberships).filter((m) => m.businessId === businessId);
+    },
+
+    async saveSubscription(subscription) {
+      data.subscriptions[subscription.businessId] = subscription;
+      persist();
+    },
+    async getSubscription(businessId) {
+      return data.subscriptions[businessId] ?? null;
+    },
+
+    // Mirrors the Redis INCR: read and write are one step here because
+    // this store is single-threaded, so there is no interleaving to lose.
+    async incrementUsage(key, by = 1) {
+      data.usage[key] = (data.usage[key] ?? 0) + by;
+      persist();
+      return data.usage[key];
+    },
+    async getUsage(key) {
+      return data.usage[key] ?? 0;
     },
 
     async hasProcessedMessage(id) {
