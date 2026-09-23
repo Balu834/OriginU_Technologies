@@ -238,7 +238,7 @@ export function whatsappSettingsPage({
     ${connected ? steps : `<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
     ${current}
     ${form}
-    <p class="sub"><a href="/settings/team">Team settings</a></p>`);
+    ${settingsNav("/settings/whatsapp")}`);
 }
 
 export function teamSettingsPage({ members = [], canManage = false, role = "", error } = {}) {
@@ -290,7 +290,8 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
         <tbody>${rows}</tbody>
       </table>
     </div>
-    ${addForm}`);
+    ${addForm}
+    ${settingsNav("/settings/team")}`);
 }
 
 /**
@@ -405,7 +406,7 @@ export function billingPage({
       ${upgradeBlock({ checkout, plan, role, pricing })}
     </div>
 
-    <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`,
+    ${settingsNav("/settings/billing")}`,
     // Only wired up when there is genuinely something to buy; otherwise
     // the page ships no payment script at all.
     canBuy ? checkoutScript({ businessName: business?.name ?? "", prefill }) : "");
@@ -567,4 +568,101 @@ function checkoutScript({ businessName = "", prefill = {} } = {}) {
   });
 })();
 </script>`;
+}
+
+/**
+ * The business profile form.
+ *
+ * Fields are grouped by whether the runtime actually uses them, and the
+ * page says so. "Services" and "Service areas" are stored and drive the
+ * onboarding checklist, but nothing in the conversation engine reads them
+ * yet — labelling them as live configuration would be a promise the code
+ * does not keep.
+ */
+export function businessSettingsPage({
+  business = {}, canManage = false, role = "", errors = {}, error = "", saved = false,
+} = {}) {
+  const v = (k) => escapeHtml(business?.[k] ?? "");
+  const csv = (k) => escapeHtml((business?.[k] ?? []).join(", "));
+  const err = (k) => (errors?.[k] ? `<p class="error">${escapeHtml(errors[k])}</p>` : "");
+  const ro = canManage ? "" : " disabled";
+
+  const form = `<form class="card" method="POST" action="/settings/business">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Profile</h2>
+      <p class="hint" style="margin:0 0 4px">What customers are told, and where your leads go.</p>
+
+      <label for="name">Business name</label>
+      <input id="name" name="name" value="${v("name")}" required${ro}>
+      ${err("name")}
+
+      <label for="industry">Industry</label>
+      <input id="industry" name="industry" value="${v("industry")}"${ro}>
+
+      <label for="businessPhone">Business phone</label>
+      <input id="businessPhone" name="businessPhone" value="${v("businessPhone")}" placeholder="+91…"${ro}>
+
+      <label for="ownerName">Owner name</label>
+      <input id="ownerName" name="ownerName" value="${v("ownerName")}"${ro}>
+
+      <h2 style="font-family:var(--display);font-size:19px;margin:22px 0 4px">Lead notifications</h2>
+      <label for="ownerWhatsApp">Send new leads to this WhatsApp number</label>
+      <input id="ownerWhatsApp" name="ownerWhatsApp" value="${v("ownerWhatsApp")}" placeholder="+919876543210" required${ro}>
+      <p class="hint">International format. Every new lead is sent here — if this is wrong, you will not hear about your leads. Saving does not send a test message.</p>
+      ${err("ownerWhatsApp")}
+
+      <label for="timezone">Timezone</label>
+      <input id="timezone" name="timezone" value="${v("timezone")}"${ro}>
+      ${err("timezone")}
+
+      <h2 style="font-family:var(--display);font-size:19px;margin:22px 0 4px">Services and areas</h2>
+      <p class="hint" style="margin:0 0 4px">
+        Stored on your business and used for your setup checklist. The automated replies
+        do not read these yet, so changing them will not change what customers are sent.
+      </p>
+
+      <label for="services">Services</label>
+      <input id="services" name="services" value="${csv("services")}" placeholder="AC repair, Wiring"${ro}>
+      <p class="hint">Comma separated.</p>
+
+      <label for="areas">Service areas</label>
+      <input id="areas" name="areas" value="${csv("areas")}" placeholder="Kukatpally, Madhapur"${ro}>
+
+      <label for="greeting">Greeting</label>
+      <input id="greeting" name="greeting" value="${v("greeting")}"${ro}>
+      ${err("greeting")}
+
+      ${canManage ? `<button class="full" type="submit">Save changes</button>` : ""}
+      ${errorBlock(error)}
+    </form>`;
+
+  const roleNote = canManage
+    ? ""
+    : `<div class="card"><p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view these settings but not change them.</p></div>`;
+
+  return page("Business settings", `
+    <div class="masthead">
+      <div>
+        <h1>Business</h1>
+        <div class="sub">${escapeHtml(business?.name ?? "")}</div>
+      </div>
+      <a class="backlink" href="/leads">Leads</a>
+    </div>
+    ${saved ? `<div class="notice">Settings saved.</div>` : ""}
+    ${roleNote}
+    ${form}
+    ${settingsNav("/settings/business")}`);
+}
+
+/** One navigation strip, so every settings page links to the others. */
+export function settingsNav(current = "") {
+  const links = [
+    ["/settings/business", "Business"],
+    ["/settings/whatsapp", "WhatsApp"],
+    ["/settings/team", "Team"],
+    ["/settings/billing", "Billing"],
+  ];
+  return `<p class="sub">${links
+    .filter(([href]) => href !== current)
+    .map(([href, label]) => `<a href="${href}">${label}</a>`)
+    .join(" · ")}</p>`;
 }

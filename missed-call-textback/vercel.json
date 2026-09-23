@@ -76,6 +76,10 @@
     {
       "source": "/billing/status",
       "destination": "/api/app"
+    },
+    {
+      "source": "/settings/business",
+      "destination": "/api/app"
     }
   ]
 }

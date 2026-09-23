@@ -25,11 +25,13 @@ import {
 import { handleBillingGet } from "./billing.mjs";
 import { handleCreateSubscription } from "./billingCheckout.mjs";
 import { handleBillingStatus } from "./billingStatus.mjs";
+import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./businessSettings.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
+  "/settings/business",
 ]);
 
 const ROUTES = [
@@ -46,6 +48,8 @@ const ROUTES = [
   ["POST", "/signup", handleSignupPost],
   ["GET", "/onboarding", handleOnboardingGet],
   ["POST", "/onboarding", handleOnboardingPost],
+  ["GET", "/settings/business", handleBusinessSettingsGet],
+  ["POST", "/settings/business", handleBusinessSettingsPost],
   ["GET", "/settings/whatsapp", handleWhatsappSettingsGet],
   ["POST", "/settings/whatsapp", handleWhatsappSettingsPost],
   ["GET", "/settings/billing", handleBillingGet],

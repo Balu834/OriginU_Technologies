@@ -74,6 +74,90 @@ export function businessRecord({
   };
 }
 
+/**
+ * Applies an edit to a business profile.
+ *
+ * Built by naming the fields a form may change and copying everything
+ * else from the existing record, so a crafted post cannot reach `id`,
+ * `passwordHash`, `missedCallApiKey`, `createdAt` or any credential. The
+ * safe list is the allow-list; there is no deny-list to forget to update
+ * when a field is added later.
+ *
+ * Returns `{ business, errors }`. Nothing is persisted here — the caller
+ * decides, and only after checking `errors` is empty.
+ */
+export function applyBusinessProfile(existing, input = {}, { isValidPhone, normalizePhone } = {}) {
+  const errors = {};
+  const text = (v) => String(v ?? "").trim();
+  const list = (v) =>
+    Array.isArray(v) ? v.map(text).filter(Boolean)
+      : text(v).split(",").map((s) => s.trim()).filter(Boolean);
+
+  const name = text(input.name);
+  if (!name) errors.name = "Business name is required.";
+  if (name.length > 120) errors.name = "Business name is too long.";
+
+  // The owner's number is where every lead alert goes, so a typo here is
+  // silent lead loss. Validated against the same E.164 rule the WhatsApp
+  // send path uses, rather than a looser one that would accept something
+  // Meta later rejects.
+  const ownerWhatsApp = normalizePhone ? normalizePhone(text(input.ownerWhatsApp)) : text(input.ownerWhatsApp);
+  if (!ownerWhatsApp) {
+    errors.ownerWhatsApp = "A WhatsApp number for lead alerts is required.";
+  } else if (isValidPhone && !isValidPhone(ownerWhatsApp)) {
+    errors.ownerWhatsApp = "Enter the number in international format, e.g. +919876543210.";
+  }
+
+  const timezone = text(input.timezone) || existing?.timezone || "Asia/Kolkata";
+  if (timezone.length > 64) errors.timezone = "That timezone does not look right.";
+
+  const greeting = text(input.greeting);
+  if (greeting.length > 500) errors.greeting = "Keep the greeting under 500 characters.";
+
+  const business = {
+    ...existing,
+    // Only these may move.
+    name,
+    ownerName: text(input.ownerName) || existing?.ownerName || "",
+    ownerWhatsApp,
+    industry: text(input.industry),
+    businessPhone: text(input.businessPhone),
+    timezone,
+    greeting,
+    services: list(input.services),
+    areas: list(input.areas),
+    // Explicitly re-pinned from the existing record so that even a future
+    // spread mistake above cannot let a form rewrite identity.
+    id: existing.id,
+    createdAt: existing.createdAt,
+    passwordHash: existing.passwordHash,
+    missedCallApiKey: existing.missedCallApiKey,
+    phoneNumberId: existing.phoneNumberId,
+    wabaId: existing.wabaId,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return { business, errors };
+}
+
+/** Safe to render. Never carries the dashboard password hash or the missed-call API key. */
+export function publicBusiness(business) {
+  if (!business) return null;
+  return {
+    id: business.id,
+    name: business.name ?? "",
+    industry: business.industry ?? "",
+    businessPhone: business.businessPhone ?? "",
+    timezone: business.timezone ?? "",
+    ownerName: business.ownerName ?? "",
+    ownerWhatsApp: business.ownerWhatsApp ?? "",
+    services: [...(business.services ?? [])],
+    areas: [...(business.areas ?? [])],
+    greeting: business.greeting ?? "",
+    updatedAt: business.updatedAt ?? null,
+  };
+}
+
 export const CONNECTION_STATES = ["NOT_CONNECTED", "CONFIGURED", "CONNECTED", "ERROR"];
 
 /**
@@ -158,13 +242,43 @@ export async function loadBusinessRegistry(store, config) {
     stored = []; // a store failure must not take the live tenant offline
   }
 
+  // Start from the environment, overlay the stored record's NON-EMPTY
+  // values, then re-assert the fields the environment owns outright.
+  //
+  // Only non-empty stored values win, so a record saved with blank
+  // profile fields cannot wipe the live tenant's name or owner number;
+  // and the credential fields are re-applied last, so no write to the
+  // store can redirect a working integration.
   const storedDefault = stored.find((b) => b.id === envBusiness.id);
   const merged = storedDefault
-    ? { ...storedDefault, ...stripEmpty(envBusiness) }
+    ? { ...envBusiness, ...stripEmpty(storedDefault), ...stripEmpty(pick(envBusiness, ENV_AUTHORITATIVE)) }
     : envBusiness;
 
   const others = stored.filter((b) => b.id !== envBusiness.id);
   return createBusinessRegistry([merged, ...others]);
+}
+
+/**
+ * The fields the environment still owns for the `default` business.
+ *
+ * Deliberately only credentials and routing: the number Meta delivers to,
+ * the API key the phone automation authenticates with, the template name,
+ * the dashboard password. A bad write to the store must not be able to
+ * redirect a working production integration.
+ *
+ * Profile fields are NOT on this list, and that matters: while the
+ * environment overrode everything, saving a new owner WhatsApp number for
+ * the live business appeared to succeed and then had no effect, because
+ * MOHAMED_WHATSAPP_NUMBER shadowed it on the next read. Editing a profile
+ * has to actually change behaviour or it is theatre.
+ */
+const ENV_AUTHORITATIVE = [
+  "phoneNumberId", "wabaId", "missedCallApiKey",
+  "missedCallTemplate", "templateLanguage", "passwordHash", "status",
+];
+
+function pick(obj, keys) {
+  return Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 }
 
 /** Env values only override where they actually have a value. */
