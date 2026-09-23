@@ -72,6 +72,10 @@
     {
       "source": "/razorpay-webhook",
       "destination": "/api/razorpay-webhook"
+    },
+    {
+      "source": "/billing/status",
+      "destination": "/api/app"
     }
   ]
 }

@@ -66,7 +66,7 @@ const STYLES = `
   td { padding:9px 0; border-top:1px solid var(--line); }
 `;
 
-function page(title, body) {
+function page(title, body, script = "") {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -75,7 +75,18 @@ function page(title, body) {
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
 <style>${STYLES}</style>
-</head><body><div class="wrap">${body}</div></body></html>`;
+</head><body><div class="wrap">${body}</div>${script}</body></html>`;
+}
+
+/**
+ * Embeds a value for client-side JS to read.
+ *
+ * A `<` inside a JSON string could close the script element early and
+ * turn data into markup, so it is escaped. This only ever carries the
+ * public, non-secret values the checkout widget needs.
+ */
+function jsonForScript(value) {
+  return JSON.stringify(value ?? null).replace(/</g, "\\u003c");
 }
 
 const errorBlock = (error) => (error ? `<p class="error">${escapeHtml(error)}</p>` : "");
@@ -292,7 +303,7 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
  */
 export function billingPage({
   business, subscription, entitlements, usage, plans = {}, role = "",
-  checkout = null, pricing = {},
+  checkout = null, pricing = {}, prefill = {},
 } = {}) {
   const plan = entitlements?.plan ?? "FREE";
   const limits = entitlements?.limits ?? {};
@@ -330,6 +341,14 @@ export function billingPage({
   const degraded = subscription && subscription.plan !== subscription.effectivePlan
     ? `<p class="hint" style="margin:8px 0 0">This business is on ${escapeHtml(subscription.plan)} but its subscription is ${escapeHtml(subscription.status)}, so ${escapeHtml(subscription.effectivePlan)} limits apply.</p>`
     : "";
+
+  // Whether this page should ship the payment script at all. Same
+  // conditions the upgrade button uses, so a page with no button never
+  // carries checkout code.
+  const canBuy = plan === "FREE"
+    && (role === "OWNER" || role === "ADMIN")
+    && Boolean(checkout?.available)
+    && (checkout?.purchasable ?? []).some((name) => pricing?.[name]?.display);
 
   // Prices come from the server's pricing table via `pricing`; the view
   // never computes or restates one.
@@ -386,7 +405,10 @@ export function billingPage({
       ${upgradeBlock({ checkout, plan, role, pricing })}
     </div>
 
-    <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`);
+    <p class="sub"><a href="/settings/whatsapp">WhatsApp settings</a> · <a href="/settings/team">Team settings</a></p>`,
+    // Only wired up when there is genuinely something to buy; otherwise
+    // the page ships no payment script at all.
+    canBuy ? checkoutScript({ businessName: business?.name ?? "", prefill }) : "");
 }
 
 /**
@@ -416,9 +438,133 @@ function upgradeBlock({ checkout, plan, role, pricing = {} }) {
   if (!buyable.length) {
     return `<p class="hint" style="margin:0">No plan is currently available for purchase.</p>`;
   }
-  return buyable.map((name) => `<form method="POST" action="/billing/create-subscription">
-      <input type="hidden" name="plan" value="${escapeHtml(name)}">
-      <button class="full" type="submit">Upgrade to ${escapeHtml(name)} — ${escapeHtml(pricing[name].display)}</button>
+  // A button, not a form post: the endpoint answers JSON and the payment
+  // widget has to be opened from script. Without JavaScript there is no
+  // way to take a card payment at all, so `noscript` says so plainly
+  // rather than offering a control that cannot work.
+  return buyable.map((name) => `<div>
+      <button class="full" type="button" id="upgrade-${escapeHtml(name)}" data-plan="${escapeHtml(name)}">
+        Upgrade to ${escapeHtml(name)} — ${escapeHtml(pricing[name].display)}
+      </button>
+      <p class="hint" id="checkout-status" role="status" aria-live="polite" hidden></p>
       <p class="hint">You'll be taken to our payment provider. Your plan changes only after payment is confirmed.</p>
-    </form>`).join("");
+      <noscript><p class="hint">Upgrading needs JavaScript enabled, because the payment form runs in your browser.</p></noscript>
+    </div>`).join("");
+}
+
+/**
+ * The checkout client.
+ *
+ * Three rules it exists to obey:
+ *
+ * 1. It never decides the plan. The widget's success callback means the
+ *    customer finished a form, not that money moved — so on success it
+ *    asks the SERVER what the plan is, and keeps asking until the answer
+ *    changes, which only the verified webhook can cause.
+ * 2. It never sends a price, a currency, a Razorpay plan id or a
+ *    business id. It sends a plan NAME; the server decides the rest.
+ * 3. Every failure — dismissed widget, declined payment, blocked script,
+ *    network error — leaves the plan exactly as it was, and says so.
+ *
+ * Plain DOM code with no build step, matching the rest of this codebase.
+ */
+function checkoutScript({ businessName = "", prefill = {} } = {}) {
+  return `<script>
+(function () {
+  var btn = document.querySelector("[id^='upgrade-']");
+  if (!btn) return;
+  var out = document.getElementById("checkout-status");
+  var BUSINESS = ${jsonForScript(businessName)};
+  var PREFILL = ${jsonForScript(prefill)};
+  var busy = false;
+
+  function say(msg) { if (out) { out.textContent = msg; out.hidden = false; } }
+  function release(msg) { busy = false; btn.disabled = false; say(msg); }
+
+  function loadWidget(cb) {
+    if (window.Razorpay) return cb(null);
+    var s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.async = true;
+    s.onload = function () { cb(window.Razorpay ? null : new Error("Payment form unavailable.")); };
+    s.onerror = function () { cb(new Error("Payment form could not be loaded.")); };
+    document.head.appendChild(s);
+  }
+
+  var tries = 0;
+  function confirmWithServer() {
+    tries++;
+    fetch("/billing/status", { headers: { "Accept": "application/json" }, credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s && s.plan === "PRO") {
+          say("Subscription active. Refreshing\\u2026");
+          setTimeout(function () { location.reload(); }, 800);
+          return;
+        }
+        if (tries < 10) {
+          say("Payment confirmation is pending\\u2026");
+          setTimeout(confirmWithServer, 3000);
+        } else {
+          say("Payment confirmation is still pending. This page will show PRO as soon as your payment is confirmed \\u2014 you do not need to pay again.");
+        }
+      })
+      .catch(function () {
+        if (tries < 10) setTimeout(confirmWithServer, 3000);
+        else say("Could not reach the server to confirm. Reload this page shortly.");
+      });
+  }
+
+  btn.addEventListener("click", function () {
+    if (busy) return;
+    busy = true;
+    btn.disabled = true;
+    say("Starting checkout\\u2026");
+
+    fetch("/billing/create-subscription", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ plan: btn.getAttribute("data-plan") })
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.body || !res.body.subscriptionId) {
+          throw new Error((res.body && res.body.error) || "Could not start checkout.");
+        }
+        loadWidget(function (err) {
+          if (err) {
+            release(err.message + " Nothing has been charged and your plan is unchanged.");
+            return;
+          }
+          var rzp = new window.Razorpay({
+            key: res.body.keyId,
+            subscription_id: res.body.subscriptionId,
+            name: BUSINESS || "Missed-call textback",
+            description: res.body.plan + " \\u2014 " + res.body.displayPrice,
+            prefill: PREFILL,
+            handler: function () {
+              say("Payment submitted. We're confirming your subscription\\u2026");
+              confirmWithServer();
+            },
+            modal: {
+              ondismiss: function () {
+                release("Checkout closed. Nothing has been charged and your plan is unchanged.");
+              }
+            }
+          });
+          if (rzp.on) {
+            rzp.on("payment.failed", function () {
+              release("Payment failed. Your plan has not changed.");
+            });
+          }
+          rzp.open();
+        });
+      })
+      .catch(function (e) {
+        release(e && e.message ? e.message : "Could not start checkout.");
+      });
+  });
+})();
+</script>`;
 }

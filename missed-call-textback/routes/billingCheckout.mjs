@@ -60,12 +60,43 @@ export async function handleCreateSubscription(ctx, deps) {
     return { status: 503, body: { error: `no price is configured for ${requested} yet` } };
   }
 
-  // Don't let someone stack subscriptions by clicking twice.
   const existing = await billing.forBusiness(actor.businessId);
-  if (existing && !existing.implicit && existing.providerSubscriptionId && isLive(existing.status)) {
+
+  // Already paying: nothing to buy.
+  //
+  // Note `plan !== "FREE"` is load-bearing. A FREE business's normal
+  // status is ACTIVE, so testing the status alone treated every
+  // free-plan customer as already subscribed — which meant anyone who
+  // started checkout and abandoned it could never start it again.
+  if (existing && !existing.implicit && existing.providerSubscriptionId
+      && existing.plan !== "FREE" && isLive(existing.status)) {
     return {
       status: 409,
       body: { error: "this business already has an active subscription", status: existing.status },
+    };
+  }
+
+  // Checkout was already started for this same plan and has not been
+  // confirmed yet. Hand back the SAME Razorpay subscription rather than
+  // creating a second one — a double-click, a refresh or a retry after a
+  // dropped connection must not leave two subscriptions against one
+  // business, because both could eventually charge.
+  if (existing && !existing.implicit && existing.providerSubscriptionId && existing.pendingPlan === requested) {
+    log("checkout_resumed", { businessId: actor.businessId, plan: requested });
+    return {
+      status: 200,
+      body: {
+        subscriptionId: existing.providerSubscriptionId,
+        keyId: publicConfig(razorpay).keyId,
+        plan: requested,
+        amountPaise: PLAN_PRICING[requested].amountPaise,
+        currency: PLAN_PRICING[requested].currency,
+        interval: PLAN_PRICING[requested].interval,
+        displayPrice: formatPrice(requested),
+        resumed: true,
+        activated: false,
+        message: "Resuming the checkout you already started. Your plan changes only after payment is confirmed.",
+      },
     };
   }
 

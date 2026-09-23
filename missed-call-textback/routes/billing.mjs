@@ -26,6 +26,9 @@ export async function handleBillingGet(ctx, deps) {
     return { status: 302, headers: { Location: session.userId ? "/onboarding" : "/leads" }, body: {} };
   }
 
+  // Prefill for the payment widget: only the signed-in user's own
+  // details, read via the session's user id, never anyone else's.
+  const user = actor.user?.id ? await deps.store.getUser?.(actor.user.id) : null;
   const subscription = await deps.billing.forBusiness(actor.businessId);
   const entitlements = await deps.billing.getBusinessEntitlements(actor.businessId);
   const usage = await deps.usage.summary(actor.businessId);
@@ -49,6 +52,10 @@ export async function handleBillingGet(ctx, deps) {
           display: formatPrice(name),
         }])
       ),
+      prefill: {
+        name: deps.businesses?.byId(actor.businessId)?.ownerName ?? "",
+        email: user?.email ?? "",
+      },
       checkout: {
         available: isCheckoutConfigured(deps.razorpay),
         // A plan is offered only if it is priced AND the provider has a
