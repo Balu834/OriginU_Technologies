@@ -52,7 +52,10 @@ export async function handleDashboard(ctx, deps) {
   const leads = await tenant.store.listLeads();
   return {
     status: 200,
-    html: dashboardPage(leads, query, { deleted: ctx.query?.get("deleted") === "1" }),
+    html: dashboardPage(leads, query, {
+      deleted: ctx.query?.get("deleted") === "1",
+      business: tenant.business, actor: tenant.actor,
+    }),
   };
 }
 
@@ -118,6 +121,7 @@ export async function handleLeadDetail(ctx, deps) {
     html: leadDetailPage(lead, messages, {
       canDelete: can(tenant.actor.role, "manageSettings"),
       role: tenant.actor.role,
+      business: tenant.business, actor: tenant.actor,
     }),
   };
 }

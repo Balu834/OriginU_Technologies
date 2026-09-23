@@ -5,10 +5,10 @@
  * No page here ever receives a credential to render — the settings view
  * is handed `publicView(integration)`, which cannot contain one.
  */
-import { TOKENS, escapeHtml } from "./views.mjs";
+import { escapeHtml } from "./views.mjs";
+import { appShell, SHELL_STYLES } from "./shell.mjs";
 
 const STYLES = `
-  ${TOKENS}
   * { box-sizing:border-box; }
   html { -webkit-text-size-adjust:100%; }
   body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
@@ -66,16 +66,31 @@ const STYLES = `
   td { padding:9px 0; border-top:1px solid var(--line); }
 `;
 
-function page(title, body, script = "") {
-  return `<!doctype html>
+/**
+ * Settings pages render inside the application shell. The page CSS below
+ * is injected alongside it rather than replaced, so every existing form
+ * and control keeps working unchanged.
+ *
+ * `signup` and `onboarding` happen before a business exists, so they pass
+ * `bare: true` and get a standalone centred page instead of a sidebar
+ * that would have nothing to point at.
+ */
+function page(title, body, script = "", { active = "", business = null, actor = null, bare = false } = {}) {
+  if (bare) {
+    return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
-<style>${STYLES}</style>
+<style>${SHELL_STYLES}${STYLES}</style>
 </head><body><div class="wrap">${body}</div>${script}</body></html>`;
+  }
+  return appShell({
+    title, active, business, actor,
+    body: `<style>${STYLES}</style><div class="wrap">${body}</div>${script}`,
+  });
 }
 
 /**
@@ -105,7 +120,7 @@ export function signupPage({ error, email = "" } = {}) {
       <button class="full" type="submit">Create account</button>
       ${errorBlock(error)}
     </form>
-    <p class="sub">Already have one? <a href="/login">Sign in</a>.</p>`);
+    <p class="sub">Already have one? <a href="/leads">Sign in</a>.</p>`, "", { bare: true });
 }
 
 export function onboardingPage({ error } = {}) {
@@ -142,12 +157,12 @@ export function onboardingPage({ error } = {}) {
 
       <button class="full" type="submit">Create business</button>
       ${errorBlock(error)}
-    </form>`);
+    </form>`, "", { bare: true });
 }
 
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
-  error, verification = null,
+  error, verification = null, business: shellBusiness = null, actor = null,
 } = {}) {
   const connected = status === "CONNECTED";
 
@@ -238,10 +253,11 @@ export function whatsappSettingsPage({
     ${connected ? steps : `<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
     ${current}
     ${form}
-    ${settingsNav("/settings/whatsapp")}`);
+    ${settingsNav("/settings/whatsapp")}`, "",
+    { active: "/settings/whatsapp", business: shellBusiness ?? business, actor });
 }
 
-export function teamSettingsPage({ members = [], canManage = false, role = "", error } = {}) {
+export function teamSettingsPage({ members = [], canManage = false, role = "", error, business = null, actor = null } = {}) {
   const rows = members.length
     ? members.map((m) => `
         <tr>
@@ -291,7 +307,8 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
       </table>
     </div>
     ${addForm}
-    ${settingsNav("/settings/team")}`);
+    ${settingsNav("/settings/team")}`, "",
+    { active: "/settings/team", business, actor });
 }
 
 /**
@@ -304,7 +321,7 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
  */
 export function billingPage({
   business, subscription, entitlements, usage, plans = {}, role = "",
-  checkout = null, pricing = {}, prefill = {},
+  checkout = null, pricing = {}, prefill = {}, actor = null,
 } = {}) {
   const plan = entitlements?.plan ?? "FREE";
   const limits = entitlements?.limits ?? {};
@@ -409,7 +426,8 @@ export function billingPage({
     ${settingsNav("/settings/billing")}`,
     // Only wired up when there is genuinely something to buy; otherwise
     // the page ships no payment script at all.
-    canBuy ? checkoutScript({ businessName: business?.name ?? "", prefill }) : "");
+    canBuy ? checkoutScript({ businessName: business?.name ?? "", prefill }) : "",
+    { active: "/settings/billing", business, actor });
 }
 
 /**
@@ -580,7 +598,7 @@ function checkoutScript({ businessName = "", prefill = {} } = {}) {
  * does not keep.
  */
 export function businessSettingsPage({
-  business = {}, canManage = false, role = "", errors = {}, error = "", saved = false,
+  business = {}, canManage = false, role = "", errors = {}, error = "", saved = false, actor = null,
 } = {}) {
   const v = (k) => escapeHtml(business?.[k] ?? "");
   const csv = (k) => escapeHtml((business?.[k] ?? []).join(", "));
@@ -650,7 +668,8 @@ export function businessSettingsPage({
     ${saved ? `<div class="notice">Settings saved.</div>` : ""}
     ${roleNote}
     ${form}
-    ${settingsNav("/settings/business")}`);
+    ${settingsNav("/settings/business")}`, "",
+    { active: "/settings/business", business, actor });
 }
 
 /** One navigation strip, so every settings page links to the others. */

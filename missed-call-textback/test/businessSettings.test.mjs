@@ -248,7 +248,14 @@ test("OWNER and ADMIN may edit; STAFF may not", async () => {
   const view = await handleBusinessSettingsGet(getCtx(staffSession), w);
   assert.equal(view.status, 200);
   assert.ok(view.html.includes("not change them"), "STAFF was not told the page is read-only");
-  assert.ok(!view.html.includes('type="submit"'), "STAFF was shown a save button");
+
+  // Only the shell's log-out button may be submittable. Checked by label
+  // rather than by the bare presence of type="submit", which the shell
+  // now also matches.
+  const submits = [...view.html.matchAll(/<button[^>]*type="submit"[^>]*>([^<]*)/g)].map((m) => m[1].trim());
+  assert.deepEqual(submits, ["Log out"], `STAFF was shown a save control: ${JSON.stringify(submits)}`);
+  assert.ok(!view.html.includes("Save changes"), "STAFF was shown the save button");
+  assert.ok(view.html.includes(" disabled"), "STAFF's inputs were left editable");
 });
 
 // ---------------------------------------------------- tenant isolation

@@ -45,6 +45,7 @@ export async function handleBusinessSettingsGet(ctx, deps) {
       canManage: can(actor.role, "manageSettings"),
       role: actor.role,
       saved: ctx.query?.get("saved") === "1",
+      actor,
     }),
   };
 }

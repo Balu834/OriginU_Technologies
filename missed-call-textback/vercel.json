@@ -84,6 +84,10 @@
     {
       "source": "/lead/delete",
       "destination": "/api/app"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/api/app"
     }
   ]
 }

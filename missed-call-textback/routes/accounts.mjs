@@ -132,6 +132,7 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
       verification: verificationNotice(ctx.query?.get("v")),
       canManage: can(actor.role, "manageSettings"),
       role: actor.role,
+      actor,
     }),
   };
 }

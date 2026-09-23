@@ -25,6 +25,7 @@ import {
 import { handleBillingGet } from "./billing.mjs";
 import { handleCreateSubscription } from "./billingCheckout.mjs";
 import { handleBillingStatus } from "./billingStatus.mjs";
+import { handleOverview } from "./overview.mjs";
 import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./businessSettings.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
@@ -37,6 +38,7 @@ export const NON_JSON_POSTS = new Set([
 const ROUTES = [
   ["GET", "/health", handleHealth],
   ["GET", "/", handleLanding],
+  ["GET", "/dashboard", handleOverview],
   ["GET", "/leads", handleDashboard],
   ["GET", "/lead", handleLeadDetail],
   ["POST", "/leads/status", handleLeadStatus],

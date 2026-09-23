@@ -14,6 +14,8 @@
  * CDN request or a base64 payload on every page load, and neither is worth
  * it on Indian mobile data.
  */
+import { appShell, SHELL_STYLES } from "./shell.mjs";
+
 import { LEAD_STATUSES, STATUS_LABELS, isValidStatus, leadPriority, allowedTransitions } from "./leads.mjs";
 
 export function escapeHtml(value) {
@@ -48,7 +50,6 @@ export const TOKENS = `
 `;
 
 const STYLES = `
-  ${TOKENS}
   * { box-sizing:border-box; }
   html { -webkit-text-size-adjust:100%; }
   body {
@@ -221,7 +222,22 @@ const STYLES = `
   }
 `;
 
-function page(title, body) {
+/**
+ * Signed-in pages render inside the application shell (sidebar, top bar,
+ * palette). The page-specific CSS below is injected alongside rather than
+ * rewritten, so every existing form, control and class keeps working
+ * exactly as it did — this redesign adds chrome around the product, it
+ * does not re-implement the product.
+ */
+function page(title, body, { active = "", business = null, actor = null, actions = "" } = {}) {
+  return appShell({
+    title, active, business, actor, actions,
+    body: `<style>${STYLES}</style><div class="wrap">${body}</div>`,
+  });
+}
+
+/** Sign-in has no session, so it gets no shell — just a centred card. */
+function barePage(title, body) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -229,12 +245,12 @@ function page(title, body) {
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
-<style>${STYLES}</style>
+<style>${SHELL_STYLES}${STYLES}</style>
 </head><body><div class="wrap">${body}</div></body></html>`;
 }
 
 export function loginPage({ error } = {}) {
-  return page("Sign in", `
+  return barePage("Sign in", `
     <div class="gate">
       <div class="plate">Planet Electrical</div>
       <h1>Leads</h1>
@@ -355,7 +371,7 @@ export function filterLeads(leads, { q = "", status = "", urgency = "" } = {}) {
  * the customer exchange — they were sent to the business, not to the
  * customer, and mixing them would misrepresent what the customer saw.
  */
-export function leadDetailPage(lead, messages = [], { canDelete = false, role = "" } = {}) {
+export function leadDetailPage(lead, messages = [], { canDelete = false, role = "", business = null, actor = null } = {}) {
   const raw = String(lead.callerNumber ?? "");
   const digits = dialable(raw);
   const priority = leadPriority(lead);
@@ -459,7 +475,8 @@ export function leadDetailPage(lead, messages = [], { canDelete = false, role = 
       ${transcript}
     </section>
     ${alerts}
-    ${deleteControl(lead, canDelete, role)}`);
+    ${deleteControl(lead, canDelete, role)}`,
+    { active: "/leads", business, actor });
 }
 
 /**
@@ -501,7 +518,7 @@ function option(value, label, selected) {
   return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
 }
 
-export function dashboardPage(leads, query = {}, { deleted = false } = {}) {
+export function dashboardPage(leads, query = {}, { deleted = false, business = null, actor = null } = {}) {
   const { q = "", status = "", urgency = "" } = query;
 
   const notice = deleted ? `<div class="flash">Lead deleted.</div>` : "";
@@ -551,15 +568,12 @@ export function dashboardPage(leads, query = {}, { deleted = false } = {}) {
     body = visible.map((lead) => leadCard(lead, query)).join("");
   }
 
+  // The masthead's own title and sign-out are gone: the shell carries both
+  // now, and two sign-out buttons on one page is a trap.
   return page("Leads", `
-    <div class="masthead">
-      <div>
-        <h1>Leads</h1>
-        <div class="tally">${tally}</div>
-      </div>
-      <form class="signout" method="POST" action="/logout"><button type="submit">Sign out</button></form>
-    </div>
+    <p class="sub" style="margin:0 0 18px">Every customer captured from your missed calls. ${tally}</p>
     ${notice}
     ${controls}
-    ${body}`);
+    ${body}`,
+    { active: "/leads", business, actor });
 }

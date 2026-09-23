@@ -69,7 +69,9 @@ test("a session from login unlocks the leads view", async () => {
   assert.equal(res.status, 200);
   assert.match(res.html, /Ravi/);
   assert.match(res.html, /Whitefield/);
-  assert.match(res.html, /Sign out/);
+  // A way out must exist. Asserted as the form rather than its label, so
+  // rewording the button doesn't fail the test while removing it does.
+  assert.match(res.html, /action="\/logout"/, "the signed-in view offers no way to log out");
 });
 
 test("a forged session id does not unlock the leads view", async () => {
