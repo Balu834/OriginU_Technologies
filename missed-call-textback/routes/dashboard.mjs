@@ -7,11 +7,25 @@ import { resolveActor, can } from "../lib/users.mjs";
 import { clientForBusiness } from "../lib/outbound.mjs";
 import { deleteLead } from "../lib/deleteLead.mjs";
 import { landingPage } from "../lib/landing.mjs";
+import { PLAN_ENTITLEMENTS, formatPrice } from "../lib/billing.mjs";
 import { log } from "../lib/logger.mjs";
 
-/** GET / — the public pitch. No auth, no customer data on it. */
+/**
+ * GET / — the public pitch. No auth, no customer data on it.
+ *
+ * Plan prices and limits are read from the billing configuration rather
+ * than written into the page, so the pitch cannot end up advertising a
+ * price or an allowance the product no longer offers.
+ */
 export function handleLanding(ctx, { config }) {
-  return { status: 200, html: landingPage({ businessName: config.BUSINESS_NAME || "us" }) };
+  const plans = Object.fromEntries(
+    ["FREE", "PRO"].map((name) => [name, {
+      price: formatPrice(name),
+      leads: PLAN_ENTITLEMENTS[name].leadsPerMonth,
+      messages: PLAN_ENTITLEMENTS[name].messagesPerMonth,
+    }])
+  );
+  return { status: 200, html: landingPage({ businessName: config.BUSINESS_NAME || "", plans }) };
 }
 
 /** GET /leads — the leads dashboard, or the login form when there's no valid session. */

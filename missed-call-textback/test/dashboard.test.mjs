@@ -114,8 +114,52 @@ test("the public landing page serves without a session", async () => {
   const deps = depsWithPassword();
   const res = await handleLanding({ headers: {} }, deps);
   assert.equal(res.status, 200);
-  assert.match(res.html, /How it works/);
+  assert.match(res.html, /how it works/i);
   assert.doesNotMatch(res.html, /type="password"/, "the pitch page should not be a login form");
+});
+
+test("every link on the landing page points at a route that exists", async () => {
+  const { NON_JSON_POSTS } = await import("../routes/router.mjs");
+  const routerSource = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../routes/router.mjs", import.meta.url), "utf8"));
+
+  // The GET routes the dispatch table actually serves.
+  const servesGet = new Set(
+    [...routerSource.matchAll(/\["GET",\s*"([^"]+)"/g)].map((m) => m[1])
+  );
+
+  const html = (await handleLanding({ headers: {} }, depsWithPassword())).html;
+  const targets = [...new Set([...html.matchAll(/href="([^"#]+)"/g)].map((m) => m[1]))];
+  assert.ok(targets.length > 0, "the page has no links at all");
+
+  for (const target of targets) {
+    assert.ok(
+      servesGet.has(target),
+      `the landing page links to ${target}, which has no GET route — visitors would get a 404`
+    );
+  }
+
+  // The specific trap: /login is POST-only, so the sign-in link has to be
+  // the page that actually renders the form.
+  assert.ok(!targets.includes("/login"), "/login is POST-only and would 404 as a link");
+  assert.ok(targets.includes("/leads"), "there is no route to sign in from");
+  assert.ok(targets.includes("/signup"), "there is no route to sign up from");
+  assert.ok(NON_JSON_POSTS.has("/login"), "assumption changed: /login is no longer a POST route");
+});
+
+test("the landing page advertises the real plan prices and limits", async () => {
+  const { PLAN_ENTITLEMENTS, formatPrice } = await import("../lib/billing.mjs");
+  const html = (await handleLanding({ headers: {} }, depsWithPassword())).html;
+
+  // Whatever billing says today must be what the pitch says.
+  assert.ok(html.includes(formatPrice("PRO")), "the advertised Pro price is not the configured one");
+  assert.ok(html.includes(String(PLAN_ENTITLEMENTS.FREE.leadsPerMonth)), "the free lead allowance is not shown");
+  assert.ok(html.includes(String(PLAN_ENTITLEMENTS.PRO.leadsPerMonth)), "the Pro lead allowance is not shown");
+
+  // Claims the product cannot honour.
+  for (const claim of [/unlimited/i, /free trial/i, /\b7[- ]day/i, /cancel anytime/i]) {
+    assert.doesNotMatch(html, claim, `the landing page makes a claim the product does not implement: ${claim}`);
+  }
 });
 
 test("the landing page leaks no lead data, session or not", async () => {
