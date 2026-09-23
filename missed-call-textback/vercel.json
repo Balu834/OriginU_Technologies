@@ -50,6 +50,10 @@
       "destination": "/api/app"
     },
     {
+      "source": "/settings/billing",
+      "destination": "/api/app"
+    },
+    {
       "source": "/health",
       "destination": "/api/health"
     },
