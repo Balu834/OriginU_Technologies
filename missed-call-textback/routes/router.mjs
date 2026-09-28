@@ -16,7 +16,7 @@
 import { handleHealth } from "./health.mjs";
 import {
   handleLanding, handleDashboard, handleLeadDetail, handleLeadStatus,
-  handleLeadPriority, handleRetryNotification, handleLeadDelete, handleLogin, handleLogout,
+  handleLeadPriority, handleRetryNotification, handleLeadDelete, handleLoginPage, handleLogin, handleLogout,
 } from "./dashboard.mjs";
 import {
   handleSignupGet, handleSignupPost, handleOnboardingGet, handleOnboardingPost,
@@ -46,6 +46,7 @@ const ROUTES = [
   ["POST", "/lead/priority", handleLeadPriority],
   ["POST", "/lead/retry-notify", handleRetryNotification],
   ["POST", "/lead/delete", handleLeadDelete],
+  ["GET", "/login", handleLoginPage],
   ["POST", "/login", handleLogin],
   ["POST", "/logout", handleLogout],
   ["GET", "/signup", handleSignupGet],

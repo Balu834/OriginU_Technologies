@@ -255,7 +255,7 @@ function barePage(title, body) {
 export function loginPage({ error } = {}) {
   return barePage("Sign in", `
     <div class="gate">
-      <div class="plate">Planet Electrical</div>
+      <div class="plate">MissedCall</div>
       <h1>Leads</h1>
       <p class="sub">Missed calls that turned into conversations.</p>
       <form method="POST" action="/login">

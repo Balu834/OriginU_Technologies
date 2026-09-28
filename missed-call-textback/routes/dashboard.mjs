@@ -18,7 +18,7 @@ import { log } from "../lib/logger.mjs";
  * than written into the page, so the pitch cannot end up advertising a
  * price or an allowance the product no longer offers.
  */
-export function handleLanding(ctx, { config }) {
+export function handleLanding() {
   const plans = Object.fromEntries(
     ["FREE", "PRO"].map((name) => [name, {
       price: formatPrice(name),
@@ -26,15 +26,16 @@ export function handleLanding(ctx, { config }) {
       messages: PLAN_ENTITLEMENTS[name].messagesPerMonth,
     }])
   );
-  return { status: 200, html: landingPage({ businessName: config.BUSINESS_NAME || "", plans }) };
+  // Deliberately no businessName. This is the shared marketing page every
+  // visitor sees, not a tenant's own dashboard, and BUSINESS_NAME is the
+  // legacy single-tenant config — passing it here printed one customer's
+  // name in the footer of the public homepage.
+  return { status: 200, html: landingPage({ plans }) };
 }
 
 /** GET /leads — the leads dashboard, or the login form when there's no valid session. */
 export async function handleDashboard(ctx, deps) {
-  const { store, config } = deps;
-  if (!config.DASHBOARD_PASSWORD_HASH) {
-    return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
-  }
+  const { store } = deps;
   const session = await currentSession(ctx, store);
   if (!session) return { status: 200, html: loginPage() };
 
@@ -111,10 +112,7 @@ function noTenantResult(session) {
  * separate ownership check to forget.
  */
 export async function handleLeadDetail(ctx, deps) {
-  const { store, config } = deps;
-  if (!config.DASHBOARD_PASSWORD_HASH) {
-    return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
-  }
+  const { store } = deps;
   const session = await currentSession(ctx, store);
   if (!session) return { status: 200, html: loginPage() };
 
@@ -352,12 +350,24 @@ export async function handleLeadDelete(ctx, deps) {
   };
 }
 
+/**
+ * GET /login — renders the sign-in page.
+ *
+ * The page itself has always existed, but only as what `GET /leads` falls back
+ * to when there is no session. Nothing answered GET /login, so the obvious URL —
+ * the one the landing page's "Login" button invites you to guess, and the one a
+ * browser autocompletes — fell through the dispatch table and returned the raw
+ * `{"error":"not found"}` JSON. Signed-in visitors go to their leads instead of
+ * being shown a login form they do not need.
+ */
+export async function handleLoginPage(ctx, { store }) {
+  const session = await currentSession(ctx, store);
+  if (session) return { status: 302, headers: { Location: "/leads" }, body: {} };
+  return { status: 200, html: loginPage() };
+}
+
 /** POST /login — verifies the password and starts a session. */
 export async function handleLogin(ctx, { store, config, businesses, accounts }) {
-  if (!config.DASHBOARD_PASSWORD_HASH) {
-    return { status: 503, html: loginPage({ error: "Dashboard password is not configured." }) };
-  }
-
   if (await loginRateLimited(ctx, store)) {
     log("dashboard_login_rate_limited", {});
     return { status: 429, html: loginPage({ error: "Too many attempts. Try again later." }) };
@@ -393,6 +403,19 @@ export async function handleLogin(ctx, { store, config, businesses, accounts }) 
 
   // TODO(remove): legacy per-business credential, kept so the existing
   // default business keeps working until it has a real account.
+  //
+  // DASHBOARD_PASSWORD_HASH is read HERE AND NOWHERE ELSE in this file, and
+  // that is the point. It used to guard the top of this handler, of
+  // handleLoginPage, of handleDashboard and of handleLeadDetail — which meant
+  // a deployment that had not set the legacy deployment-wide secret returned
+  // 503 to every real account holder, while signup carried on creating
+  // accounts nobody could then sign in to. A leftover single-tenant
+  // credential must not decide whether multi-tenant auth works.
+  //
+  // Nothing is weakened by moving it: verifyPassword returns false for an
+  // empty or malformed stored hash, and businesses.byPassword skips any
+  // business whose passwordHash is blank. An unset hash therefore fails this
+  // branch closed, which is what the 503 was really achieving.
   const business = businesses?.byPassword(submitted, verifyPassword) ?? null;
   const authorised = businesses ? Boolean(business) : verifyPassword(submitted, config.DASHBOARD_PASSWORD_HASH);
 

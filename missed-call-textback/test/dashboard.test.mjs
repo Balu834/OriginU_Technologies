@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { hashPassword, verifyPassword, parseCookies, COOKIE_NAME } from "../lib/auth.mjs";
 import { escapeHtml, dashboardPage } from "../lib/views.mjs";
-import { handleLanding, handleDashboard, handleLogin, handleLogout } from "../routes/dashboard.mjs";
+import { handleLanding, handleDashboard, handleLoginPage, handleLogin, handleLogout } from "../routes/dashboard.mjs";
 import { createTestDeps } from "./helpers.mjs";
+import { createAccountService } from "../lib/users.mjs";
 
 const PASSWORD = "correct horse battery staple";
 
@@ -150,10 +151,73 @@ test("repeated failed logins are rate limited", async () => {
   assert.ok(sawRateLimit, "brute forcing the password must eventually be throttled");
 });
 
-test("the dashboard refuses to serve when no password is configured", async () => {
+/**
+ * This test used to assert 503, and that assertion was the bug.
+ *
+ * DASHBOARD_PASSWORD_HASH is the LEGACY, deployment-wide, single-tenant
+ * credential. It guarded the top of handleDashboard, handleLeadDetail,
+ * handleLoginPage and handleLogin, so a deployment that had not set it
+ * answered 503 to everyone — including people with real accounts, whose
+ * signup had been allowed to succeed because handleSignupPost had no such
+ * gate. Accounts you can create but never sign in to.
+ *
+ * Unconfigured now means what it should have meant all along: no session, so
+ * you get the sign-in page and none of the data behind it.
+ */
+test("with no legacy password configured the dashboard shows the sign-in page, not a 503", async () => {
   const deps = createTestDeps({ DASHBOARD_PASSWORD_HASH: "" });
   const res = await handleDashboard({ headers: {} }, deps);
-  assert.equal(res.status, 503);
+
+  assert.equal(res.status, 200);
+  assert.match(res.html, /type="password"/, "an unauthenticated visitor must still be offered a sign-in form");
+  assert.doesNotMatch(res.html, /<table/, "no lead table may be served without a session");
+});
+
+test("the sign-in page renders when no legacy password is configured", async () => {
+  const deps = createTestDeps({ DASHBOARD_PASSWORD_HASH: "" });
+  const res = await handleLoginPage({ headers: {} }, deps);
+
+  assert.equal(res.status, 200);
+  assert.match(res.html, /name="email"/);
+  assert.match(res.html, /name="password"/);
+});
+
+/**
+ * The regression the 503 was hiding: a real account must be able to sign in
+ * on a deployment that never set the legacy hash.
+ */
+test("an account signs in with email and password even when no legacy hash exists", async () => {
+  const deps = createTestDeps({ DASHBOARD_PASSWORD_HASH: "" });
+  deps.accounts = createAccountService(deps.store);
+
+  const email = "owner@example.com";
+  const password = "a-long-enough-password";
+  await deps.accounts.signUp({ email, password });
+
+  const res = await handleLogin({
+    headers: {},
+    rawBody: Buffer.from(new URLSearchParams({ email, password }).toString()),
+  }, deps);
+
+  assert.equal(res.status, 302, "a valid account was refused because the legacy hash was absent");
+  assert.match(res.headers["Set-Cookie"], new RegExp(`^${COOKIE_NAME}=`));
+
+  const wrong = await handleLogin({
+    headers: {},
+    rawBody: Buffer.from(new URLSearchParams({ email, password: "not-the-password" }).toString()),
+  }, deps);
+  assert.equal(wrong.status, 401, "a wrong password must still be refused");
+});
+
+/**
+ * And the other half: with no hash and no account, a password-only sign-in
+ * fails closed. This is what the 503 was really protecting, and it still holds
+ * without coupling account auth to a legacy env var.
+ */
+test("a password-only sign-in fails closed when no legacy hash is configured", async () => {
+  const deps = createTestDeps({ DASHBOARD_PASSWORD_HASH: "" });
+  const res = await handleLogin(formCtx("anything-at-all"), deps);
+  assert.equal(res.status, 401);
 });
 
 test("the public landing page serves without a session", async () => {
@@ -251,4 +315,63 @@ test("emergency leads are marked urgent in the rendered page", () => {
     { id: "e", callerNumber: "+919000000003", name: "Priya", problem: "socket sparking", emergency: true, createdAt: new Date().toISOString() },
   ]);
   assert.match(html, /URGENT/);
+});
+
+/**
+ * GET /login used to fall through the dispatch table.
+ *
+ * The sign-in form only ever existed as what GET /leads renders without a
+ * session, and nothing answered GET /login — so the one URL a visitor is most
+ * likely to type, and the one the landing page's "Login" button invites them to
+ * guess, returned the raw {"error":"not found"} JSON in production.
+ */
+test("GET /login serves the sign-in page rather than a JSON error", async () => {
+  const deps = depsWithPassword();
+  const res = await handleLoginPage({ headers: {} }, deps);
+
+  assert.equal(res.status, 200);
+  assert.match(res.html, /type="password"/, "GET /login must render the sign-in form");
+  assert.match(res.html, /action="\/login"/, "the form must post back to /login");
+});
+
+test("GET /login sends a signed-in visitor to their leads instead of a login form", async () => {
+  const deps = depsWithPassword();
+  const login = await handleLogin(formCtx(PASSWORD), deps);
+  const id = login.headers["Set-Cookie"].split(";")[0].split("=")[1];
+
+  const res = await handleLoginPage({ headers: { cookie: `${COOKIE_NAME}=${id}` } }, deps);
+
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.Location, "/leads");
+});
+
+/**
+ * The sign-in page is the first thing a new customer sees, and it is shared by
+ * every tenant. It carried the name of the business this was originally built
+ * for, so everyone who signed up was greeted by a stranger's company.
+ */
+test("the sign-in page carries the product name, not a tenant's", async () => {
+  const deps = depsWithPassword();
+  const res = await handleLoginPage({ headers: {} }, deps);
+
+  assert.doesNotMatch(res.html, /Planet Electrical/, "a tenant name must not appear on the shared sign-in page");
+  assert.match(res.html, /MissedCall/);
+});
+
+/**
+ * Same defect as the sign-in page above, one page over and harder to see:
+ * the public marketing homepage took BUSINESS_NAME — the legacy
+ * single-tenant config — and printed "Run by <that tenant>." in its footer.
+ * Every visitor to the product's own front page was told it was run by one
+ * customer. The test fixtures set BUSINESS_NAME, so rendering with them is
+ * the condition that used to reproduce it.
+ */
+test("the public landing page carries no tenant's name, even when one is configured", () => {
+  const deps = createTestDeps({ BUSINESS_NAME: "Planet Electrical" });
+  const res = handleLanding({ headers: {} }, deps);
+
+  assert.equal(res.status, 200);
+  assert.doesNotMatch(res.html, /Planet Electrical/, "a tenant name must not appear on the shared landing page");
+  assert.doesNotMatch(res.html, /Run by/, "the footer must not attribute the product to one business");
+  assert.match(res.html, /MissedCall/);
 });

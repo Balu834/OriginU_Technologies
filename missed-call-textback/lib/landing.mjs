@@ -379,7 +379,7 @@ export function landingPage({ businessName = "", plans = null } = {}) {
         <div class="mock-head"><i></i><i></i><i></i><b>WhatsApp</b></div>
         <div class="chat">
           <div class="bub sys">Missed call · +91 95051 41818</div>
-          <div class="bub out">Sorry we missed your call — this is Planet Electrical. Reply here with what you need and your area.</div>
+          <div class="bub out">Sorry we missed your call — this is City Electricals. Reply here with what you need and your area.</div>
           <div class="bub in">AC not cooling</div>
           <div class="bub out">Sure. What area are you located in?</div>
           <div class="bub in">Kukatpally</div>
