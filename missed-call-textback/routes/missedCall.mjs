@@ -122,9 +122,30 @@ export async function handleMissedCall(ctx, deps) {
   });
 
   if (!sent.ok) {
+    // Meta's error envelope (code + message) carries no credentials, and
+    // without it a failed send is undiagnosable from the logs.
+    log("whatsapp_template_failed", {
+      callerNumber: caller,
+      template: config.WHATSAPP_MISSED_CALL_TEMPLATE,
+      status: sent.status ?? null,
+      metaError: sent.body?.error
+        ? { code: sent.body.error.code ?? null, subcode: sent.body.error.error_subcode ?? null, message: sent.body.error.message ?? null }
+        : null,
+    });
     // Don't mark as sent — a retry within the dedupe window should still
     // get through instead of being silently swallowed by a failed attempt.
-    return { status: 502, body: { sent: false, error: "failed to send WhatsApp template" } };
+    // Only a caller holding this business's API key reaches this line, and
+    // Meta's code/message is the one thing that says what to fix.
+    return {
+      status: 502,
+      body: {
+        sent: false,
+        error: "failed to send WhatsApp template",
+        metaError: sent.body?.error
+          ? { code: sent.body.error.code ?? null, subcode: sent.body.error.error_subcode ?? null, message: sent.body.error.message ?? null }
+          : null,
+      },
+    };
   }
 
   await store.markMissedCall(caller, Date.now());
