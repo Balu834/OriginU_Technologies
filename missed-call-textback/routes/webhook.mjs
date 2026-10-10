@@ -117,6 +117,18 @@ export function handleWebhookPost(ctx, deps) {
         // Delivery receipts for messages we sent. These say what actually
         // happened to a message, as opposed to the API having accepted it.
         for (const status of change.value?.statuses ?? []) {
+          // A "failed" receipt carries Meta's reason (payment method missing,
+          // recipient unreachable, ...). Log it before the lookup below:
+          // without the code an accepted-then-failed send is undiagnosable.
+          if (status.status === "failed") {
+            const e = status.errors?.[0] ?? {};
+            log("delivery_failed", {
+              metaCode: e.code ?? null,
+              metaTitle: e.title ?? null,
+              metaMessage: e.message ?? null,
+              metaDetails: e.error_data?.details ?? null,
+            });
+          }
           try {
             const stored = await tenantStore.findMessageByProviderId?.(status.id);
             if (!stored) continue;
