@@ -595,6 +595,9 @@ export function landingPage({ businessName = "", plans = null } = {}) {
       <a href="#faq">FAQ</a>
       <a href="${LOGIN_URL}">Login</a>
       <a href="${SIGNUP_URL}">Get Started</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="/data-deletion">Data deletion</a>
     </nav>
   </div>
   <div class="wrap"><p class="fine">${escapeHtml(businessName ? `Run by ${businessName}.` : "")} WhatsApp is a trademark of Meta Platforms, Inc.</p></div>

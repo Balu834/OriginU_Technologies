@@ -28,6 +28,7 @@ import { handleBillingStatus } from "./billingStatus.mjs";
 import { handleOverview } from "./overview.mjs";
 import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./businessSettings.mjs";
 import { handleWhatsappConnect, handleWhatsappTest } from "./whatsappConnect.mjs";
+import { handlePrivacy, handleTerms, handleDataDeletion } from "./legal.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
@@ -39,6 +40,9 @@ export const NON_JSON_POSTS = new Set([
 const ROUTES = [
   ["GET", "/health", handleHealth],
   ["GET", "/", handleLanding],
+  ["GET", "/privacy", handlePrivacy],
+  ["GET", "/terms", handleTerms],
+  ["GET", "/data-deletion", handleDataDeletion],
   ["GET", "/dashboard", handleOverview],
   ["GET", "/leads", handleDashboard],
   ["GET", "/lead", handleLeadDetail],

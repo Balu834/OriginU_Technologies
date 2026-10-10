@@ -96,6 +96,18 @@
     {
       "source": "/dashboard",
       "destination": "/api/app"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/terms",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/data-deletion",
+      "destination": "/api/app"
     }
   ]
 }
