@@ -111,6 +111,13 @@ export async function handleWhatsappConnect(ctx, deps) {
   const base = String(deps.config?.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
   const pageUrl = String(body.pageUrl ?? "");
   const redirectUris = [];
+  // The redirect_uri Meta's own dialog was opened with, as read by the page.
+  // Accepted only when it is one of Meta's relay addresses: it is sent to
+  // Meta next to our app secret, so nothing else may ride in this field.
+  const dialogRedirect = String(body.dialogRedirectUri ?? "");
+  if (dialogRedirect.length < 1200 && /^https:\/\/([a-z0-9-]+\.)*facebook\.com\//.test(dialogRedirect)) {
+    redirectUris.push(dialogRedirect, dialogRedirect.split("#")[0]);
+  }
   if (base) {
     const settingsUrl = `${base}/settings/whatsapp`;
     if (pageUrl.startsWith(settingsUrl) && pageUrl.length < 300) redirectUris.push(pageUrl);

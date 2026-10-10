@@ -493,6 +493,23 @@ function embeddedSignupScript(signup) {
     }
   });
 
+  // Meta binds the code to the redirect_uri of the dialog the SDK opened,
+  // and for a popup that is one of Meta's own relay addresses with values
+  // minted per login. It cannot be guessed, but it can be read: the SDK
+  // opens the dialog with window.open, and the address is right there in
+  // its redirect_uri parameter. The server needs it to exchange the code.
+  var dialogRedirectUri = "";
+  var nativeOpen = window.open;
+  window.open = function (url) {
+    try {
+      var u = new URL(String(url), location.href);
+      if (/(^|\\.)facebook\\.com$/.test(u.hostname) && u.pathname.indexOf("/dialog/oauth") !== -1) {
+        dialogRedirectUri = u.searchParams.get("redirect_uri") || "";
+      }
+    } catch (e) { /* not a URL we care about */ }
+    return nativeOpen.apply(window, arguments);
+  };
+
   function send(code) {
     say("Finishing your connection\\u2026");
     fetch("/settings/whatsapp/connect", {
@@ -504,7 +521,8 @@ function embeddedSignupScript(signup) {
         phoneNumberId: (assets && assets.phoneNumberId) || "",
         wabaId: (assets && assets.wabaId) || "",
         seen: seen,
-        pageUrl: location.href.split("#")[0]
+        pageUrl: location.href.split("#")[0],
+        dialogRedirectUri: dialogRedirectUri
       })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
