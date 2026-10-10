@@ -58,7 +58,7 @@ const ALL_SECRETS = [TOKEN_A, TOKEN_B, CODE_A, CODE_B, APP_SECRET];
  * token reaches their own number" are separate, independently falsifiable
  * facts.
  */
-function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], failExchange = false } = {}) {
+function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], failExchange = false, grants = {} } = {}) {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     const u = String(url);
@@ -77,6 +77,17 @@ function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], fai
         return json(400, { error: { message: "Invalid verification code format.", code: 100, fbtrace_id: "TX" } });
       }
       return json(200, { access_token: granted, token_type: "bearer" });
+    }
+
+    // debug_token is called with the APP token in the query, not a bearer
+    // header. `grants` maps a business token to the WABA ids it was given.
+    if (u.includes("/debug_token")) {
+      const input = new URL(u).searchParams.get("input_token");
+      const ids = grants[input] ?? [];
+      return json(200, { data: { is_valid: true, granular_scopes: [
+        { scope: "whatsapp_business_management", target_ids: ids },
+        { scope: "whatsapp_business_messaging", target_ids: ids },
+      ] } });
     }
 
     if (!validTokens.includes(token)) {
@@ -531,8 +542,10 @@ test("every failure is reported as one of our sentences, never a Meta error", as
 
   const cases = [
     [{ phoneNumberId: PHONE_A, wabaId: WABA_A }, SIGNUP_FAILURES.MISSING_CODE],
-    [{ code: CODE_A }, SIGNUP_FAILURES.MISSING_ASSETS],
-    [{ code: CODE_A, phoneNumberId: PHONE_A }, SIGNUP_FAILURES.MISSING_ASSETS],
+    // The code is exchanged before the number is looked for, so with Meta
+    // rejecting the code every coded request ends at the exchange.
+    [{ code: CODE_A }, SIGNUP_FAILURES.EXCHANGE_FAILED],
+    [{ code: CODE_A, phoneNumberId: PHONE_A }, SIGNUP_FAILURES.EXCHANGE_FAILED],
     [GOOD_A, SIGNUP_FAILURES.EXCHANGE_FAILED],
   ];
 
@@ -776,4 +789,47 @@ test("the success screen shows the connected number and offers a test, with no i
   // The raw ids belong to the technical section, not to this screen.
   assert.ok(!main.includes(PHONE_A), "a phone number id was shown to the customer");
   assert.ok(!main.includes(WABA_A), "a WABA id was shown to the customer");
+});
+
+// ============================== 6. Meta sends the code but not the number
+
+test("when the browser gets a code but no number, the one number Meta granted is connected", async () => {
+  const w = await buildWorld({ meta: honestMeta({ grants: { [TOKEN_A]: [WABA_A] } }) });
+  const res = await connect(w, await sessionFor(w, w.userA), { code: CODE_A });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.connected, true);
+  const stored = await w.integrations.forBusiness(w.bizA.id);
+  assert.equal(stored.phoneNumberId, PHONE_A);
+  assert.equal(stored.wabaId, WABA_A);
+  assert.equal(integrationState(stored), "CONNECTED");
+});
+
+test("a granted number that another business already holds is refused as taken, not moved", async () => {
+  const w = await buildWorld({ meta: honestMeta({ grants: { [TOKEN_A]: [WABA_A], [TOKEN_B]: [WABA_A] } }) });
+  await connect(w, await sessionFor(w, w.userA), GOOD_A);
+
+  const res = await connect(w, await sessionFor(w, w.userB), { code: CODE_B });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.reason, SIGNUP_FAILURES.NUMBER_TAKEN);
+  assert.equal(await w.integrations.forBusiness(w.bizB.id), null);
+  assert.equal((await w.integrations.forBusiness(w.bizA.id)).phoneNumberId, PHONE_A, "A keeps its number");
+});
+
+test("with several usable numbers granted, nothing is guessed", async () => {
+  const w = await buildWorld({ meta: honestMeta({ grants: { [TOKEN_A]: [WABA_A, WABA_B] } }) });
+  const res = await connect(w, await sessionFor(w, w.userA), { code: CODE_A });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.reason, SIGNUP_FAILURES.MISSING_ASSETS);
+  assert.equal(await w.integrations.forBusiness(w.bizA.id), null);
+});
+
+test("a token granted no WhatsApp account connects nothing", async () => {
+  const w = await buildWorld({ meta: honestMeta({ grants: {} }) });
+  const res = await connect(w, await sessionFor(w, w.userA), { code: CODE_A });
+
+  assert.equal(res.body.reason, SIGNUP_FAILURES.MISSING_ASSETS);
+  assert.equal(await w.integrations.forBusiness(w.bizA.id), null);
+  assert.ok(!JSON.stringify(res.body).includes(TOKEN_A), "no token in the response");
 });

@@ -77,8 +77,8 @@ export async function handleWhatsappConnect(ctx, deps) {
 
   const body = readBody(ctx);
   const code = String(body.code ?? "").trim();
-  const phoneNumberId = String(body.phoneNumberId ?? body.phone_number_id ?? "").trim();
-  const wabaId = String(body.wabaId ?? body.waba_id ?? "").trim();
+  let phoneNumberId = String(body.phoneNumberId ?? body.phone_number_id ?? "").trim();
+  let wabaId = String(body.wabaId ?? body.waba_id ?? "").trim();
 
   // Logged before refusing: an abandoned or half-delivered Meta flow is
   // otherwise invisible, because the browser is the only place it shows.
@@ -100,10 +100,6 @@ export async function handleWhatsappConnect(ctx, deps) {
     });
   }
   if (!code) return refuse(400, SIGNUP_FAILURES.MISSING_CODE);
-  // Meta hands both ids back together. Without them there is nothing to
-  // connect, and guessing which number the customer meant is exactly the
-  // kind of assumption that files one tenant's traffic under another.
-  if (!phoneNumberId || !wabaId) return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
 
   const exchanged = await deps.embeddedSignup.exchangeCode(code);
   if (!exchanged.ok) {
@@ -111,6 +107,40 @@ export async function handleWhatsappConnect(ctx, deps) {
     return refuse(exchanged.reason === SIGNUP_FAILURES.NETWORK_ERROR ? 502 : 400, exchanged.reason);
   }
   const accessToken = exchanged.accessToken;
+
+  // The browser did not say which number was chosen. Ask Meta what this
+  // token was actually granted instead of guessing. Exactly one usable
+  // number is connected; anything else is refused, because picking one of
+  // several is exactly the assumption that files one tenant's traffic
+  // under another.
+  if ((!phoneNumberId || !wabaId) && deps.embeddedSignup.discoverAssets) {
+    const found = await deps.embeddedSignup.discoverAssets(accessToken);
+    const candidates = found.candidates ?? [];
+    const free = [];
+    const takenElsewhere = [];
+    for (const c of candidates) {
+      const owner = await deps.integrations.byPhoneNumberId?.(c.phoneNumberId);
+      if (owner && owner.businessId !== actor.businessId) takenElsewhere.push(c);
+      else free.push(c);
+    }
+    log("embedded_signup_discovered", {
+      businessId: actor.businessId,
+      ok: Boolean(found.ok),
+      wabaCount: found.wabaCount ?? 0,
+      numbers: candidates.length,
+      free: free.length,
+      takenElsewhere: takenElsewhere.length,
+    });
+    if (free.length === 1) {
+      phoneNumberId = free[0].phoneNumberId;
+      wabaId = free[0].wabaId;
+    } else if (free.length === 0 && takenElsewhere.length > 0) {
+      return refuse(409, SIGNUP_FAILURES.NUMBER_TAKEN);
+    } else {
+      return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
+    }
+  }
+  if (!phoneNumberId || !wabaId) return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
 
   // Both best-effort, both reported. Neither can make a connection
   // CONNECTED and neither failing is allowed to discard a token the

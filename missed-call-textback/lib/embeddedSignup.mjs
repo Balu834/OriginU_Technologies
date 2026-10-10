@@ -216,6 +216,70 @@ export function createEmbeddedSignupClient({
     },
 
     /**
+     * Finds the WhatsApp accounts and numbers the customer just shared,
+     * by asking Meta rather than relying on the browser.
+     *
+     * Embedded Signup is supposed to post the chosen WABA and number into
+     * the page, but that message does not always arrive (it never did for
+     * this app's configuration, on desktop or phone). The exchanged token
+     * itself records what was granted: `debug_token` lists the WABA ids
+     * under the WhatsApp scopes, and each WABA lists its numbers.
+     *
+     * Returns every (wabaId, phoneNumberId) pair found. Choosing between
+     * several is the caller's job — guessing here could connect the wrong
+     * number.
+     */
+    async discoverAssets(accessToken) {
+      const token = String(accessToken ?? "").trim();
+      if (!token) return { ok: false, reason: SIGNUP_FAILURES.MISSING_CODE, candidates: [] };
+
+      let debug;
+      try {
+        const params = new URLSearchParams({ input_token: token, access_token: `${appId}|${appSecret}` });
+        debug = await call(`/debug_token?${params}`);
+      } catch (err) {
+        logError("embedded_signup_unreachable", err, { step: "discover" });
+        return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR, candidates: [] };
+      }
+      if (!debug.ok) {
+        const meta = metaError(debug.body);
+        log("embedded_signup_discover_failed", { metaCode: meta?.code ?? null, metaMessage: meta?.message ?? null });
+        return { ok: false, reason: SIGNUP_FAILURES.EXCHANGE_FAILED, candidates: [] };
+      }
+
+      const scopes = Array.isArray(debug.body?.data?.granular_scopes) ? debug.body.data.granular_scopes : [];
+      const wabaIds = [...new Set(
+        scopes
+          .filter((s) => s?.scope === "whatsapp_business_management" || s?.scope === "whatsapp_business_messaging")
+          .flatMap((s) => (Array.isArray(s.target_ids) ? s.target_ids : []))
+          .map(String)
+      )];
+
+      const candidates = [];
+      for (const wabaId of wabaIds.slice(0, 10)) {
+        try {
+          const res = await call(
+            `/${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name`,
+            { accessToken: token }
+          );
+          if (!res.ok) continue;
+          for (const n of Array.isArray(res.body?.data) ? res.body.data : []) {
+            if (n?.id) {
+              candidates.push({
+                wabaId,
+                phoneNumberId: String(n.id),
+                displayPhoneNumber: String(n.display_phone_number ?? ""),
+              });
+            }
+          }
+        } catch (err) {
+          logError("embedded_signup_unreachable", err, { step: "discover_numbers" });
+        }
+      }
+      return { ok: true, wabaCount: wabaIds.length, candidates };
+    },
+
+    /**
      * Trades a still-valid token for a fresh 60-day one.
      *
      * The Embedded Signup configuration Meta offers this app issues tokens
