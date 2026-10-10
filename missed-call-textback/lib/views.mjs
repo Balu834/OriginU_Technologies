@@ -584,7 +584,8 @@ export function dashboardPage(
               ${unconnected
                 ? `<p>No leads yet, and none can arrive until WhatsApp is connected.<br>
                      That's the last step before your missed calls start following themselves up.</p>
-                   <p style="margin-top:18px"><a class="btn primary" href="/settings/whatsapp">Connect WhatsApp</a></p>`
+                   <p style="margin-top:18px"><a class="btn primary" href="/settings/whatsapp">Connect WhatsApp with Facebook</a></p>
+                   <p class="hint" style="margin-top:10px">Meta owns WhatsApp, so connecting means logging in with Facebook once. It takes about 2 minutes.</p>`
                 : `<p>No leads yet.<br>They appear here the moment a customer replies.</p>`}
             </div>`;
   } else if (!visible.length) {

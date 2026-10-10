@@ -282,7 +282,13 @@ export function whatsappSettingsPage({
       ${!canManage
         ? `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>`
         : signup?.available
-          ? `<button type="button" id="connect-whatsapp" class="full">Connect WhatsApp</button>
+          ? `<p class="hint" style="margin:0 0 12px">
+               <strong>What happens next:</strong> a Facebook window opens, because Meta owns WhatsApp and
+               only lets a business connect its number after logging in with Facebook. Log in, choose your
+               business and your WhatsApp number, and you're done. It takes about 2 minutes, once.
+               No Facebook account, or rather not? <a href="mailto:support@originutech.in">Contact us</a> and we'll connect it for you.
+             </p>
+             <button type="button" id="connect-whatsapp" class="full">Connect WhatsApp with Facebook</button>
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
              <p class="hint" id="connect-recover" hidden>
                <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
