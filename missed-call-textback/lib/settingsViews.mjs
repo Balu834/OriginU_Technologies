@@ -463,10 +463,24 @@ function embeddedSignupScript(signup) {
   // Meta posts the selected WABA and business phone number into the window
   // that opened the flow. Origin-checked, and only the documented shape is
   // read — any other message on the page is ignored entirely.
+  // Any https://*.facebook.com origin: Embedded Signup is served from
+  // business.facebook.com as well as www/web, and accepting only two hosts
+  // silently threw away the one message that names the chosen number.
+  var META_ORIGIN = /^https:\\/\\/([a-z0-9-]+\\.)*facebook\\.com$/;
+  // What arrived from Meta, by shape only (no ids, no codes), so a flow that
+  // returns a code without a number can be diagnosed from the server log.
+  var seen = [];
   window.addEventListener("message", function (ev) {
-    if (ev.origin !== "https://www.facebook.com" && ev.origin !== "https://web.facebook.com") return;
+    if (!META_ORIGIN.test(ev.origin)) return;
     var data;
     try { data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
+    if (seen.length < 12) {
+      seen.push({
+        origin: ev.origin,
+        type: (data && typeof data === "object" && String(data.type || "").slice(0, 40)) || typeof data,
+        event: (data && typeof data === "object" && String(data.event || "").slice(0, 40)) || ""
+      });
+    }
     if (!data || data.type !== "WA_EMBEDDED_SIGNUP") return;
 
     if (data.event === "FINISH" || data.event === "FINISH_ONLY_WABA" || data.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
@@ -488,7 +502,8 @@ function embeddedSignupScript(signup) {
       body: JSON.stringify({
         code: code || "",
         phoneNumberId: (assets && assets.phoneNumberId) || "",
-        wabaId: (assets && assets.wabaId) || ""
+        wabaId: (assets && assets.wabaId) || "",
+        seen: seen
       })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })

@@ -88,6 +88,15 @@ export async function handleWhatsappConnect(ctx, deps) {
       hasCode: Boolean(code),
       hasPhoneNumberId: Boolean(phoneNumberId),
       hasWabaId: Boolean(wabaId),
+      // Shape only, sanitised again here: never trust the browser to have
+      // kept ids or codes out of it.
+      metaMessages: Array.isArray(body.seen)
+        ? body.seen.slice(0, 12).map((m) => ({
+            origin: String(m?.origin ?? "").replace(/[^a-z0-9.:/-]/gi, "").slice(0, 60),
+            type: String(m?.type ?? "").replace(/[^A-Z0-9_ a-z-]/g, "").slice(0, 40),
+            event: String(m?.event ?? "").replace(/[^A-Z0-9_ a-z-]/g, "").slice(0, 40),
+          }))
+        : [],
     });
   }
   if (!code) return refuse(400, SIGNUP_FAILURES.MISSING_CODE);

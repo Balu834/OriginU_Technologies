@@ -228,3 +228,19 @@ test("an expired connection stops showing a green tick and offers Connect WhatsA
   assert.match(html, /id="connect-whatsapp"/);
   assert.doesNotMatch(html, /✓ WhatsApp Connected/);
 });
+
+test("the signup page accepts Meta's messages from any facebook.com host, and nothing else", () => {
+  const html = String(whatsappSettingsPage({
+    business: { name: "Acme" }, status: "NOT_CONNECTED", canManage: true,
+    signup: { available: true, appId: "APP", configId: "CFG", graphVersion: "v23.0" },
+  }));
+  const js = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.doesNotThrow(() => new Function(js), "the inline script must parse");
+  const ORIGIN = eval(js.match(/var META_ORIGIN = (\/.*\/);/)[1]);
+  for (const ok of ["https://www.facebook.com", "https://business.facebook.com", "https://web.facebook.com"]) {
+    assert.equal(ORIGIN.test(ok), true, ok);
+  }
+  for (const bad of ["https://evil.com", "https://facebook.com.evil.com", "http://www.facebook.com", "https://notfacebook.com"]) {
+    assert.equal(ORIGIN.test(bad), false, bad);
+  }
+});
