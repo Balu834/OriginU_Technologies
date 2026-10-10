@@ -45,18 +45,19 @@ test("the empty leads page explains itself only when it knows WhatsApp isn't con
 
   const unconnected = dashboardPage([], {}, { ...opts, whatsappStatus: "NOT_CONNECTED" });
   assert.match(unconnected, /none can arrive until WhatsApp is connected/);
-  assert.match(unconnected, /href="\/settings\/whatsapp"[^>]*>Connect WhatsApp</);
+  assert.match(unconnected, /href="\/settings\/whatsapp"[^>]*>Connect WhatsApp with Facebook</);
+  assert.match(unconnected, /logging in with Facebook once/, "the Facebook step is announced before the click");
 
   // Connected and simply quiet: no nagging, and no button to a step that
   // is already done.
   const connected = dashboardPage([], {}, { ...opts, whatsappStatus: "CONNECTED" });
   assert.match(connected, /They appear here the moment a customer replies/);
-  assert.ok(!connected.includes(">Connect WhatsApp<"));
+  assert.ok(!connected.includes(">Connect WhatsApp with Facebook<"));
 
   // Unknown: says nothing about a connection it never looked up.
   const unknown = dashboardPage([], {}, opts);
   assert.match(unknown, /They appear here the moment a customer replies/);
-  assert.ok(!unknown.includes(">Connect WhatsApp<"));
+  assert.ok(!unknown.includes(">Connect WhatsApp with Facebook<"));
 
   // And a page with leads on it is never an empty state, connected or not.
   const withLeads = dashboardPage(
