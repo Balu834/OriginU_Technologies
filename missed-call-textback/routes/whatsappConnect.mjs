@@ -82,7 +82,10 @@ export async function handleWhatsappConnect(ctx, deps) {
 
   // Logged before refusing: an abandoned or half-delivered Meta flow is
   // otherwise invisible, because the browser is the only place it shows.
-  if (!code || !phoneNumberId || !wabaId) {
+  // Only when there is no code: with a code the request goes on to Meta,
+  // and the line that matters is Meta's answer — Vercel's log view shows
+  // just the first line a request writes.
+  if (!code) {
     log("embedded_signup_incomplete", {
       businessId: actor.businessId,
       hasCode: Boolean(code),
@@ -101,9 +104,29 @@ export async function handleWhatsappConnect(ctx, deps) {
   }
   if (!code) return refuse(400, SIGNUP_FAILURES.MISSING_CODE);
 
-  const exchanged = await deps.embeddedSignup.exchangeCode(code);
+  // The page that opened Meta's dialog, as candidates for the redirect_uri
+  // Meta bound the code to. Only this deployment's own /settings/whatsapp
+  // address is ever forwarded — a URL from the request body is otherwise
+  // attacker-chosen text sent to Meta alongside our app secret.
+  const base = String(deps.config?.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
+  const pageUrl = String(body.pageUrl ?? "");
+  const redirectUris = [];
+  if (base) {
+    const settingsUrl = `${base}/settings/whatsapp`;
+    if (pageUrl.startsWith(settingsUrl) && pageUrl.length < 300) redirectUris.push(pageUrl);
+    redirectUris.push(settingsUrl, `${settingsUrl}/`, `${base}/`);
+  }
+
+  const exchanged = await deps.embeddedSignup.exchangeCode(code, { redirectUris: [...new Set(redirectUris)] });
   if (!exchanged.ok) {
-    log("embedded_signup_failed", { businessId: actor.businessId, reason: exchanged.reason });
+    log("embedded_signup_failed", {
+      businessId: actor.businessId,
+      reason: exchanged.reason,
+      idsFromBrowser: Boolean(phoneNumberId && wabaId),
+      metaCode: exchanged.meta?.code ?? null,
+      metaSubcode: exchanged.meta?.subcode ?? null,
+      metaMessage: exchanged.meta?.message ?? null,
+    });
     return refuse(exchanged.reason === SIGNUP_FAILURES.NETWORK_ERROR ? 502 : 400, exchanged.reason);
   }
   const accessToken = exchanged.accessToken;

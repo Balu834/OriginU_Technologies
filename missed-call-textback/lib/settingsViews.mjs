@@ -503,7 +503,8 @@ function embeddedSignupScript(signup) {
         code: code || "",
         phoneNumberId: (assets && assets.phoneNumberId) || "",
         wabaId: (assets && assets.wabaId) || "",
-        seen: seen
+        seen: seen,
+        pageUrl: location.href.split("#")[0]
       })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })

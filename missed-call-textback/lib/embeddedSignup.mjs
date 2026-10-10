@@ -182,22 +182,32 @@ export function createEmbeddedSignupClient({
      * The code's time-to-live is measured in seconds, which is why the
      * browser posts it the moment it arrives rather than holding it.
      */
-    async exchangeCode(code) {
+    async exchangeCode(code, { redirectUris = [] } = {}) {
       const value = String(code ?? "").trim();
       if (!value) return { ok: false, reason: SIGNUP_FAILURES.MISSING_CODE };
 
-      const params = new URLSearchParams({
-        client_id: appId,
-        client_secret: appSecret,
-        code: value,
-      });
-
+      // Meta binds the code to the redirect_uri its login dialog used. For
+      // a popup opened by the JS SDK that is sometimes nothing at all and
+      // sometimes the address of the page that opened it, and Meta answers
+      // "make sure your redirect_uri is identical" when the guess is wrong.
+      // A rejected attempt does not spend the code, so try the documented
+      // form first (no redirect_uri) and then each candidate the caller
+      // vouches for. The first one Meta accepts wins.
+      const attempts = [null, ...redirectUris.filter((u) => typeof u === "string" && u)];
       let res;
-      try {
-        res = await call(`/oauth/access_token?${params}`);
-      } catch (err) {
-        logError("embedded_signup_unreachable", err, { step: "exchange" });
-        return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR };
+      for (const redirectUri of attempts) {
+        const params = new URLSearchParams({ client_id: appId, client_secret: appSecret, code: value });
+        if (redirectUri !== null) params.set("redirect_uri", redirectUri);
+        try {
+          res = await call(`/oauth/access_token?${params}`);
+        } catch (err) {
+          logError("embedded_signup_unreachable", err, { step: "exchange" });
+          return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR };
+        }
+        if (res.ok && res.body?.access_token) break;
+        // Only a redirect_uri mismatch is worth another form; any other
+        // refusal (bad code, bad secret) will not change by retrying.
+        if (!/redirect_uri/i.test(String(res.body?.error?.message ?? ""))) break;
       }
 
       const token = res.body?.access_token;

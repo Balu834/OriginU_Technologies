@@ -244,3 +244,36 @@ test("the signup page accepts Meta's messages from any facebook.com host, and no
     assert.equal(ORIGIN.test(bad), false, bad);
   }
 });
+
+// ------------------------------------------------------- redirect_uri forms
+
+const MISMATCH = [400, { error: { code: 100, message: "Error validating verification code. Please make sure your redirect_uri is identical to the one you used in the OAuth dialog request" } }];
+
+test("the code exchange retries with the page address when Meta wants a redirect_uri", async () => {
+  const PAGE = "https://example.com/settings/whatsapp";
+  const { client, calls } = graph((call) => {
+    const uri = new URL(call.url).searchParams.get("redirect_uri");
+    return uri === PAGE ? [200, { access_token: NEW_TOKEN, expires_in: SIXTY_DAYS }] : MISMATCH;
+  });
+
+  const res = await client.exchangeCode("code", { redirectUris: [`${PAGE}?e=x`, PAGE] });
+  assert.equal(res.ok, true);
+  assert.equal(res.accessToken, NEW_TOKEN);
+  const tried = calls.map((c) => new URL(c.url).searchParams.get("redirect_uri"));
+  assert.deepEqual(tried, [null, `${PAGE}?e=x`, PAGE], "documented form first, then each candidate in order");
+});
+
+test("a refusal that is not about redirect_uri is not retried", async () => {
+  const { client, calls } = graph(() => [400, { error: { code: 100, message: "This authorization code has expired." } }]);
+  const res = await client.exchangeCode("code", { redirectUris: ["https://example.com/settings/whatsapp"] });
+  assert.equal(res.ok, false);
+  assert.equal(calls.length, 1);
+});
+
+test("when every form is refused the exchange fails, with no token and no code in the result", async () => {
+  const { client, calls } = graph(() => MISMATCH);
+  const res = await client.exchangeCode("SECRET-CODE", { redirectUris: ["https://example.com/a", "https://example.com/b"] });
+  assert.equal(res.ok, false);
+  assert.equal(calls.length, 3);
+  assert.equal(JSON.stringify(res).includes("SECRET-CODE"), false);
+});
