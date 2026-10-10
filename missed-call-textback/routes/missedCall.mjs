@@ -44,8 +44,11 @@ export async function handleMissedCall(ctx, deps) {
       BUSINESS_NAME: business.name,
       OWNER_NAME: business.ownerName,
       MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp,
-      WHATSAPP_MISSED_CALL_TEMPLATE: business.missedCallTemplate,
-      WHATSAPP_TEMPLATE_LANGUAGE: business.templateLanguage,
+      // A business created through signup has no template of its own
+      // recorded; a blank here would send a template with no name. The
+      // deployment default is the one Embedded Signup creates for it.
+      WHATSAPP_MISSED_CALL_TEMPLATE: business.missedCallTemplate || config.WHATSAPP_MISSED_CALL_TEMPLATE,
+      WHATSAPP_TEMPLATE_LANGUAGE: business.templateLanguage || config.WHATSAPP_TEMPLATE_LANGUAGE,
     };
   }
 
@@ -54,7 +57,10 @@ export async function handleMissedCall(ctx, deps) {
   if (!callerNumber || !isValidE164(callerNumber)) {
     return { status: 400, body: { error: "callerNumber must be a valid E.164 phone number, e.g. +919876543210" } };
   }
-  if (!timestamp || Number.isNaN(Date.parse(timestamp))) {
+  // Optional: a phone automation that only knows the caller's number is
+  // enough, and "now" is when the call was missed. A timestamp that IS
+  // sent must still be a real one — garbage is a broken client, not a default.
+  if (timestamp !== undefined && timestamp !== null && timestamp !== "" && Number.isNaN(Date.parse(timestamp))) {
     return { status: 400, body: { error: "timestamp must be a valid ISO 8601 date-time" } };
   }
 

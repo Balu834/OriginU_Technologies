@@ -108,6 +108,14 @@
     {
       "source": "/data-deletion",
       "destination": "/api/app"
+    },
+    {
+      "source": "/settings/phone",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/phone/key",
+      "destination": "/api/app"
     }
   ]
 }

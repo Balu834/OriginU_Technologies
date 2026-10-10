@@ -179,7 +179,7 @@ const I = {
 const NAV = [
   ["Overview", [["/dashboard", "Dashboard", I.grid]]],
   ["Leads", [["/leads", "All leads", I.list]]],
-  ["Automation", [["/settings/whatsapp", "WhatsApp", I.chat]]],
+  ["Automation", [["/settings/whatsapp", "WhatsApp", I.chat], ["/settings/phone", "Phone setup", I.chat]]],
   ["Business", [["/settings/business", "Business settings", I.shop], ["/settings/team", "Team", I.team]]],
   ["Account", [["/settings/billing", "Billing", I.card]]],
 ];

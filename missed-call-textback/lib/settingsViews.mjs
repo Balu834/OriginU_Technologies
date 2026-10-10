@@ -952,6 +952,7 @@ export function settingsNav(current = "") {
   const links = [
     ["/settings/business", "Business"],
     ["/settings/whatsapp", "WhatsApp"],
+    ["/settings/phone", "Phone setup"],
     ["/settings/team", "Team"],
     ["/settings/billing", "Billing"],
   ];
@@ -959,4 +960,87 @@ export function settingsNav(current = "") {
     .filter(([href]) => href !== current)
     .map(([href, label]) => `<a href="${href}">${label}</a>`)
     .join(" · ")}</p>`;
+}
+
+/**
+ * /settings/phone — the key a business's phone uses to report missed calls,
+ * and how to set the phone up.
+ *
+ * The key is shown exactly once, on the response to the request that
+ * created it. It is never rendered again: a page anyone on the team can
+ * open must not be a place the key can be read back from. Losing it costs
+ * a regenerate, which is the right trade.
+ */
+export function phoneSetupPage({
+  business = {}, hasKey = false, keyCreatedAt = null, newKey = "", envManaged = false,
+  canManage = false, role = "", baseUrl = "", error = "", actor = null,
+} = {}) {
+  const endpoint = `${String(baseUrl).replace(/\/$/, "")}/missed-call`;
+
+  const justCreated = newKey
+    ? `<div class="card" style="border-color:var(--brand, #12805c)">
+         <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Your new key</h2>
+         <p class="hint" style="margin:0 0 10px">Copy it now. It is shown only this once. If you lose it, create a new one and update the phone.</p>
+         <input id="new-key" readonly value="${escapeHtml(newKey)}" onclick="this.select()" style="font-family:monospace">
+       </div>`
+    : "";
+
+  const state = envManaged
+    ? `<p class="hint" style="margin:0">This business's key is managed by the MissedCall team. Contact support to change it.</p>`
+    : hasKey
+      ? `<p class="hint" style="margin:0 0 12px">A key is active${keyCreatedAt ? `, created ${escapeHtml(String(keyCreatedAt).slice(0, 10))}` : ""}. Creating a new one stops the old one working immediately, so the phone must be updated straight after.</p>`
+      : `<p class="hint" style="margin:0 0 12px">No key yet. Until one is created and entered on the phone, missed calls cannot be reported.</p>`;
+
+  const action = envManaged
+    ? ""
+    : canManage
+      ? `<form method="POST" action="/settings/phone/key">
+           <button type="submit">${hasKey ? "Create a new key" : "Create key"}</button>
+         </form>`
+      : `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not create a key.</p>`;
+
+  const keyCard = `<div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Missed-call key</h2>
+      <p class="hint" style="margin:0 0 12px">Your phone uses this key to tell MissedCall that a call was missed. It identifies your business, so keep it private.</p>
+      ${state}
+      ${action}
+      ${errorBlock(error)}
+    </div>`;
+
+  const guide = `<div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Set up your Android phone</h2>
+      <p class="hint" style="margin:0 0 12px">Do this once on the phone that receives your business calls. It takes about 10 minutes. iPhones cannot do this.</p>
+      <ol class="hint" style="margin:0;padding-left:20px;line-height:1.7">
+        <li>Install <strong>MacroDroid</strong> from the Play Store and open it.</li>
+        <li>Tap <strong>Add Macro</strong>.</li>
+        <li><strong>Trigger:</strong> Call/SMS → <strong>Call Missed</strong> → Any Number.</li>
+        <li><strong>Action:</strong> Web Interactions → <strong>HTTP Request</strong>, then set:
+          <ul style="margin:6px 0 6px;padding-left:18px">
+            <li>Method: <strong>POST</strong></li>
+            <li>URL: <code>${escapeHtml(endpoint)}</code></li>
+            <li>Header <code>Authorization</code>: <code>Bearer YOUR-KEY</code> (the word Bearer, a space, then your key)</li>
+            <li>Content type: <code>application/json</code></li>
+            <li>Body: <code>{"callerNumber":"[call_number]"}</code></li>
+          </ul>
+        </li>
+        <li>Name the macro "MissedCall" and save it.</li>
+        <li>When Android asks, allow MacroDroid to read call logs and phone state, and turn off battery optimisation for MacroDroid so it keeps running.</li>
+        <li><strong>Test it:</strong> call this phone from another phone and let it ring out. The caller should get your WhatsApp message within a few seconds.</li>
+      </ol>
+      <p class="hint" style="margin:12px 0 0">The caller's number must reach MissedCall with its country code, like +919876543210. If your phone shows numbers without +91, add it in MacroDroid before <code>[call_number]</code>. Calls from the owner's own number are ignored, and the same caller is not messaged twice within 10 minutes.</p>
+    </div>`;
+
+  return page("Phone setup", `
+    <div class="masthead">
+      <div>
+        <h1>Phone setup</h1>
+        <div class="sub">${escapeHtml(business?.name ?? "")}</div>
+      </div>
+      <a class="backlink" href="/leads">Leads</a>
+    </div>
+    ${justCreated}
+    ${keyCard}
+    ${guide}
+    ${settingsNav("/settings/phone")}`, "",
+    { active: "/settings/phone", business, actor });
 }
