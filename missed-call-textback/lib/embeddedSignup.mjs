@@ -193,7 +193,9 @@ export function createEmbeddedSignupClient({
       // A rejected attempt does not spend the code, so try the documented
       // form first (no redirect_uri) and then each candidate the caller
       // vouches for. The first one Meta accepts wins.
-      const attempts = [null, ...redirectUris.filter((u) => typeof u === "string" && u)];
+      // null = parameter omitted (the documented form); "" = present but
+      // empty, which is what some JS SDK popup logins are bound to.
+      const attempts = [null, "", ...redirectUris.filter((u) => typeof u === "string" && u)];
       let res;
       for (const redirectUri of attempts) {
         const params = new URLSearchParams({ client_id: appId, client_secret: appSecret, code: value });
@@ -207,7 +209,10 @@ export function createEmbeddedSignupClient({
         if (res.ok && res.body?.access_token) break;
         // Only a redirect_uri mismatch is worth another form; any other
         // refusal (bad code, bad secret) will not change by retrying.
-        if (!/redirect_uri/i.test(String(res.body?.error?.message ?? ""))) break;
+        // "Can't load URL … app's domains" (191) is the same question
+        // answered about one candidate: that address is not allow-listed,
+        // which says nothing about the next one.
+        if (!/redirect_uri|load URL|app's domains/i.test(String(res.body?.error?.message ?? ""))) break;
       }
 
       const token = res.body?.access_token;

@@ -260,7 +260,7 @@ test("the code exchange retries with the page address when Meta wants a redirect
   assert.equal(res.ok, true);
   assert.equal(res.accessToken, NEW_TOKEN);
   const tried = calls.map((c) => new URL(c.url).searchParams.get("redirect_uri"));
-  assert.deepEqual(tried, [null, `${PAGE}?e=x`, PAGE], "documented form first, then each candidate in order");
+  assert.deepEqual(tried, [null, "", `${PAGE}?e=x`, PAGE], "omitted, then empty, then each candidate in order");
 });
 
 test("a refusal that is not about redirect_uri is not retried", async () => {
@@ -274,6 +274,18 @@ test("when every form is refused the exchange fails, with no token and no code i
   const { client, calls } = graph(() => MISMATCH);
   const res = await client.exchangeCode("SECRET-CODE", { redirectUris: ["https://example.com/a", "https://example.com/b"] });
   assert.equal(res.ok, false);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.equal(JSON.stringify(res).includes("SECRET-CODE"), false);
+});
+
+test("an address Meta has not allow-listed does not stop the next form being tried", async () => {
+  const GOOD = "https://example.com/settings/whatsapp";
+  const { client } = graph((call) => {
+    const uri = new URL(call.url).searchParams.get("redirect_uri");
+    if (uri === GOOD) return [200, { access_token: NEW_TOKEN }];
+    if (uri) return [400, { error: { code: 191, message: "Can't load URL: The domain of this URL isn't included in the app's domains." } }];
+    return MISMATCH;
+  });
+  const res = await client.exchangeCode("code", { redirectUris: ["https://example.com/other", GOOD] });
+  assert.equal(res.ok, true);
 });
