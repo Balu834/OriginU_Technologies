@@ -485,7 +485,11 @@ function embeddedSignupScript(signup) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ code: code, phoneNumberId: assets.phoneNumberId, wabaId: assets.wabaId })
+      body: JSON.stringify({
+        code: code || "",
+        phoneNumberId: (assets && assets.phoneNumberId) || "",
+        wabaId: (assets && assets.wabaId) || ""
+      })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
       .then(function (res) {
@@ -499,17 +503,24 @@ function embeddedSignupScript(signup) {
       });
   }
 
+  // Meta does not promise an order: the login callback can land before the
+  // message carrying the chosen number, especially on phones where the flow
+  // runs in a separate tab. Wait briefly for the number instead of giving
+  // up the moment the callback fires.
+  //
+  // Every outcome — including "no code" and "no number" — is POSTed, so the
+  // server logs WHY a connection did not complete and answers with the
+  // sentence to show. A failure that only exists in the browser cannot be
+  // diagnosed from anywhere else.
   function onLogin(response) {
     var code = response && response.authResponse && response.authResponse.code;
-    if (!code) {
-      fail("WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
-      return;
-    }
-    if (!assets || !assets.phoneNumberId || !assets.wabaId) {
-      fail("We couldn't find a WhatsApp Business number for this account. Finish creating your WhatsApp Business account with Meta, then try again.");
-      return;
-    }
-    send(code);
+    if (!code) { send(""); return; }
+    var waited = 0;
+    (function waitForAssets() {
+      if ((assets && assets.phoneNumberId && assets.wabaId) || waited >= 8000) { send(code); return; }
+      waited += 250;
+      setTimeout(waitForAssets, 250);
+    })();
   }
 
   btn.addEventListener("click", function () {
@@ -521,7 +532,10 @@ function embeddedSignupScript(signup) {
     busy = true;
     btn.disabled = true;
     assets = null;
-    say("Opening Meta\\u2026");
+    // On a phone the Meta flow opens as a separate tab and ends on a page
+    // that says "Please close this tab". Say so up front, or the owner is
+    // left on that page wondering whether anything happened.
+    say("Opening Meta\\u2026 On a phone, Facebook opens in a new tab: finish there, close it when it says so, and come back to this tab.");
     window.FB.login(onLogin, {
       config_id: CFG.configId,
       response_type: "code",

@@ -555,7 +555,10 @@ test("a failed flow comes back to a page offering both Try again and Advanced se
   );
 
   assert.match(html, /WhatsApp connection wasn't completed/);
-  assert.match(html, /We couldn't find a WhatsApp Business number for this account/);
+  // The failure sentence is rendered escaped (an apostrophe becomes &#39;).
+  // Matching the raw text used to pass only because the same sentence also
+  // sat unescaped in the inline script, which proved nothing about the banner.
+  assert.match(html, /We couldn(?:'|&#39;)t find a WhatsApp Business number for this account/);
   assert.match(html, /Try again/);
   assert.match(html, /Advanced setup/);
 });

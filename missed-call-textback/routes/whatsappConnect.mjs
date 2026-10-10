@@ -80,6 +80,16 @@ export async function handleWhatsappConnect(ctx, deps) {
   const phoneNumberId = String(body.phoneNumberId ?? body.phone_number_id ?? "").trim();
   const wabaId = String(body.wabaId ?? body.waba_id ?? "").trim();
 
+  // Logged before refusing: an abandoned or half-delivered Meta flow is
+  // otherwise invisible, because the browser is the only place it shows.
+  if (!code || !phoneNumberId || !wabaId) {
+    log("embedded_signup_incomplete", {
+      businessId: actor.businessId,
+      hasCode: Boolean(code),
+      hasPhoneNumberId: Boolean(phoneNumberId),
+      hasWabaId: Boolean(wabaId),
+    });
+  }
   if (!code) return refuse(400, SIGNUP_FAILURES.MISSING_CODE);
   // Meta hands both ids back together. Without them there is nothing to
   // connect, and guessing which number the customer meant is exactly the
