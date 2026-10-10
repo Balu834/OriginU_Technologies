@@ -29,6 +29,7 @@
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
 import { embeddedSignupConfig, SIGNUP_FAILURES, signupMessage } from "../lib/embeddedSignup.mjs";
+import { expiryFromSeconds } from "../lib/integrations.mjs";
 import { log, logError } from "../lib/logger.mjs";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
@@ -114,11 +115,33 @@ export async function handleWhatsappConnect(ctx, deps) {
       appSecret: "",
       verifyToken: "",
       status: "CONFIGURED",
+      // Embedded Signup tokens expire (60 days); recorded so sends can
+      // refresh ahead of it and the settings page can warn.
+      tokenExpiresAt: expiryFromSeconds(exchanged.expiresIn),
     });
     log("integration_registered", { businessId: actor.businessId, via: "embedded_signup" });
   } catch (err) {
     logError("integration_register_failed", err, { businessId: actor.businessId, via: "embedded_signup" });
     return refuse(409, SIGNUP_FAILURES.NUMBER_TAKEN);
+  }
+
+  // The customer's own WABA needs the missed-call template before a single
+  // send can work. Submitting it is best-effort and only a REQUEST: Meta's
+  // approval follows in minutes to a day, so this records what was asked,
+  // never that it is usable.
+  const templateName = deps.config?.WHATSAPP_MISSED_CALL_TEMPLATE || "missed_call_immediate";
+  let template = { ok: false, skipped: true };
+  if (deps.embeddedSignup.ensureTemplate) {
+    template = await deps.embeddedSignup.ensureTemplate(wabaId, accessToken, {
+      name: templateName,
+      language: deps.config?.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+    });
+    if (!template.skipped && deps.integrations.noteTemplate) {
+      integration = await deps.integrations.noteTemplate(integration, {
+        name: templateName,
+        state: template.ok ? (template.existing ? "existing" : "submitted") : "failed",
+      });
+    }
   }
 
   const result = await verifyStored(deps, integration, {
@@ -134,6 +157,7 @@ export async function handleWhatsappConnect(ctx, deps) {
     registered: registered.ok,
     registerSkipped: Boolean(registered.skipped),
     subscribed: subscribed.ok,
+    template: template.skipped ? "skipped" : template.ok ? (template.existing ? "existing" : "submitted") : "failed",
   });
 
   // Safe metadata only. No token, no code, no WABA id — the settings page

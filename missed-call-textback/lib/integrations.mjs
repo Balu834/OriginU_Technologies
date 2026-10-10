@@ -32,6 +32,7 @@ export function createIntegration({
   appSecret = "",
   verifyToken = "",
   status = "CONFIGURED",
+  tokenExpiresAt = null,
   encryptionKey,
 }) {
   const now = new Date().toISOString();
@@ -46,10 +47,43 @@ export function createIntegration({
     appSecretEncrypted: encryptSecret(appSecret, encryptionKey),
     verifyTokenEncrypted: encryptSecret(verifyToken, encryptionKey),
     status,
+    // ISO time the access token stops working, or null when it does not
+    // expire (manually pasted system-user tokens). Embedded Signup tokens
+    // last 60 days and are refreshed ahead of this — see tokenNeedsRefresh.
+    tokenExpiresAt: tokenExpiresAt ?? null,
     createdAt: now,
     updatedAt: now,
     lastVerifiedAt: null,
   };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Refresh this many days before a token would expire. */
+export const TOKEN_REFRESH_WINDOW_DAYS = 15;
+
+/** Turns Meta's `expires_in` seconds into the ISO time stored on the record. */
+export function expiryFromSeconds(expiresIn, now = Date.now()) {
+  const n = Number(expiresIn);
+  return Number.isFinite(n) && n > 0 ? new Date(now + n * 1000).toISOString() : null;
+}
+
+/** True once the stored token can no longer be used (or refreshed). */
+export function tokenExpired(integration, now = Date.now()) {
+  const at = Date.parse(integration?.tokenExpiresAt ?? "");
+  return Number.isFinite(at) && at <= now;
+}
+
+/**
+ * True while the token still works but is close enough to expiry that it
+ * should be exchanged for a new one. False for a token with no expiry and
+ * for one already expired — the second cannot be refreshed, only replaced
+ * by the customer reconnecting.
+ */
+export function tokenNeedsRefresh(integration, now = Date.now()) {
+  const at = Date.parse(integration?.tokenExpiresAt ?? "");
+  if (!Number.isFinite(at) || at <= now) return false;
+  return at - now <= TOKEN_REFRESH_WINDOW_DAYS * DAY_MS;
 }
 
 /**
@@ -70,6 +104,12 @@ export function publicView(integration) {
     // A machine-readable failure reason, never a credential — the settings
     // page has to be able to say WHY a connection is in ERROR.
     lastError: integration.lastError ?? null,
+    // When the connection will stop working unless refreshed, and what
+    // Meta was asked about the message template. Neither is a credential.
+    // Named for what it means to the owner; the guard test rejects any
+    // public key that even mentions a token.
+    connectionExpiresAt: integration.tokenExpiresAt ?? null,
+    template: integration.template ?? null,
   };
 }
 
@@ -229,6 +269,39 @@ export function createIntegrationService(store, config) {
         lastError: null,
         updatedAt: at,
       };
+      await store.saveIntegration(updated);
+      return updated;
+    },
+
+    /**
+     * Swaps in a refreshed access token and its new expiry.
+     *
+     * Everything else about the integration stays exactly as it was — the
+     * number, the WABA, the status and the verification history describe
+     * the same connection, which has only been given more time.
+     */
+    async replaceAccessToken(integration, accessToken, tokenExpiresAt, at = new Date().toISOString()) {
+      if (!integration || integration._legacy || !accessToken) return integration;
+      const updated = {
+        ...integration,
+        accessTokenEncrypted: encryptSecret(accessToken, key),
+        tokenExpiresAt: tokenExpiresAt ?? null,
+        tokenRefreshedAt: at,
+        updatedAt: at,
+      };
+      await store.saveIntegration(updated);
+      return updated;
+    },
+
+    /**
+     * Records what happened when the missed-call template was requested in
+     * this business's WABA: "submitted", "existing" or "failed". This is the
+     * request's outcome, not Meta's approval — approval is only ever proven
+     * by a send succeeding.
+     */
+    async noteTemplate(integration, { name, state }, at = new Date().toISOString()) {
+      if (!integration || integration._legacy) return integration;
+      const updated = { ...integration, template: { name, state, at }, updatedAt: at };
       await store.saveIntegration(updated);
       return updated;
     },

@@ -14,6 +14,8 @@
  * and silently sent on the default tenant's number.
  */
 import { createWhatsAppClientFor } from "./whatsapp.mjs";
+import { expiryFromSeconds, tokenExpired, tokenNeedsRefresh } from "./integrations.mjs";
+import { log, logError } from "./logger.mjs";
 
 /**
  * Returns a client bound to this business's credentials, or null when the
@@ -26,15 +28,46 @@ import { createWhatsAppClientFor } from "./whatsapp.mjs";
  * that predate it) the shared client is returned, because in that
  * configuration there is only one tenant and nothing to confuse it with.
  */
-export async function clientForBusiness(businessId, { wa, integrations }) {
+export async function clientForBusiness(businessId, { wa, integrations, embeddedSignup }) {
   if (!integrations) return wa ?? null;
   if (!businessId) return null;
 
-  const integration = await integrations.forBusiness(businessId);
+  let integration = await integrations.forBusiness(businessId);
   if (!integration?.phoneNumberId) return null;
 
-  const secrets = integrations.secretsOf(integration);
+  let secrets = integrations.secretsOf(integration);
   if (!secrets?.accessToken) return null;
+
+  // An expired token cannot send and cannot be refreshed. Refusing here
+  // surfaces it as an undelivered send the owner can see, instead of a
+  // Meta 401 that reads like an outage.
+  if (tokenExpired(integration)) {
+    log("outbound_refused_token_expired", { businessId });
+    return null;
+  }
+
+  // Embedded Signup tokens last 60 days. Renew ahead of the expiry on the
+  // way to a send: the business is demonstrably still using the product,
+  // and no scheduler is needed. Best-effort — the current token still
+  // works today, so a failed refresh must never block this send.
+  if (embeddedSignup?.refreshToken && tokenNeedsRefresh(integration)) {
+    try {
+      const refreshed = await embeddedSignup.refreshToken(secrets.accessToken);
+      if (refreshed.ok) {
+        integration = await integrations.replaceAccessToken(
+          integration,
+          refreshed.accessToken,
+          expiryFromSeconds(refreshed.expiresIn)
+        );
+        secrets = integrations.secretsOf(integration);
+        log("integration_token_refreshed", { businessId });
+      } else {
+        log("integration_token_refresh_failed", { businessId, reason: refreshed.reason ?? null });
+      }
+    } catch (err) {
+      logError("integration_token_refresh_error", err, { businessId });
+    }
+  }
 
   return createWhatsAppClientFor({
     phoneNumberId: integration.phoneNumberId,

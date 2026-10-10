@@ -105,6 +105,36 @@ export function embeddedSignupConfig(config = {}) {
   };
 }
 
+/**
+ * The templates this platform can create in a customer's WABA, keyed by
+ * template name. The wording matches templates.json, which is the copy a
+ * human submits by hand; the two must say the same thing because whichever
+ * one Meta approved is what the customer's callers receive.
+ */
+export const TEMPLATE_DEFINITIONS = {
+  missed_call_immediate: {
+    category: "UTILITY",
+    body:
+      "Sorry we missed your call — this is {{business_name}}. Reply here with what you need and your area, and {{owner_name}} will call you straight back.",
+    example: { business_name: "City Electricals", owner_name: "Ravi" },
+  },
+  missed_call_after_hours: {
+    category: "UTILITY",
+    body:
+      "Sorry we missed your call — this is {{business_name}}. We're closed right now but reply with what you need and your area, and {{owner_name}} will call you first thing.",
+    example: { business_name: "City Electricals", owner_name: "Ravi" },
+  },
+};
+
+/** Meta's "a template with this name/language already exists" subcodes. */
+const TEMPLATE_EXISTS_SUBCODES = new Set([2388023, 2388024]);
+
+/** Seconds until expiry as Meta reports it, or null for a non-expiring token. */
+function expiresInOf(body) {
+  const n = Number(body?.expires_in);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** Meta's error envelope, reduced to what is safe to keep and useful to read. */
 function metaError(body) {
   const err = body?.error;
@@ -182,7 +212,113 @@ export function createEmbeddedSignupClient({
         return { ok: false, reason: SIGNUP_FAILURES.EXCHANGE_FAILED, meta };
       }
 
-      return { ok: true, accessToken: String(token) };
+      return { ok: true, accessToken: String(token), expiresIn: expiresInOf(res.body) };
+    },
+
+    /**
+     * Trades a still-valid token for a fresh 60-day one.
+     *
+     * The Embedded Signup configuration Meta offers this app issues tokens
+     * that expire after 60 days. Left alone, every customer's connection
+     * would silently die two months after they connected. Meta lets a
+     * business token be exchanged for a new one while the old one is still
+     * valid, so callers refresh ahead of the expiry (see
+     * `tokenNeedsRefresh`). An EXPIRED token cannot be refreshed — the
+     * customer has to press Connect WhatsApp again.
+     */
+    async refreshToken(accessToken) {
+      const value = String(accessToken ?? "").trim();
+      if (!value) return { ok: false, reason: SIGNUP_FAILURES.MISSING_CODE };
+
+      const params = new URLSearchParams({
+        grant_type: "fb_exchange_token",
+        client_id: appId,
+        client_secret: appSecret,
+        set_token_expires_in_60_days: "true",
+        fb_exchange_token: value,
+      });
+
+      let res;
+      try {
+        res = await call(`/oauth/access_token?${params}`);
+      } catch (err) {
+        logError("embedded_signup_unreachable", err, { step: "refresh" });
+        return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR };
+      }
+
+      const token = res.body?.access_token;
+      if (!res.ok || !token) {
+        const meta = metaError(res.body);
+        log("embedded_signup_refresh_failed", {
+          status: res.status,
+          metaCode: meta?.code ?? null,
+          metaMessage: meta?.message ?? null,
+        });
+        return { ok: false, reason: SIGNUP_FAILURES.EXCHANGE_FAILED, meta };
+      }
+      return { ok: true, accessToken: String(token), expiresIn: expiresInOf(res.body) };
+    },
+
+    /**
+     * Makes sure the customer's WABA has the missed-call template.
+     *
+     * A missed call does not open a 24-hour window, so the first message
+     * must be a template that exists AND is approved in the customer's own
+     * WhatsApp Business Account — this platform's copy is no use to them.
+     * Without this step a freshly connected customer shows "Connected" and
+     * then fails every single send.
+     *
+     * Creating it only SUBMITS it; Meta approves utility templates in
+     * minutes to a day. "Already exists" is success. Best-effort like the
+     * steps beside it: a failure is reported, never allowed to discard a
+     * good connection, and can be retried by reconnecting.
+     */
+    async ensureTemplate(wabaId, accessToken, { name, language = "en" } = {}) {
+      const id = String(wabaId ?? "").trim();
+      const definition = TEMPLATE_DEFINITIONS[name];
+      if (!id) return { ok: false, reason: SIGNUP_FAILURES.MISSING_ASSETS };
+      // Only templates this codebase knows the wording of. A custom name
+      // set per deployment is that deployment's to create by hand.
+      if (!definition) return { ok: false, skipped: true };
+
+      try {
+        const res = await call(`/${encodeURIComponent(id)}/message_templates`, {
+          method: "POST",
+          accessToken,
+          body: {
+            name,
+            language,
+            category: definition.category,
+            parameter_format: "NAMED",
+            components: [
+              {
+                type: "BODY",
+                text: definition.body,
+                example: {
+                  body_text_named_params: Object.entries(definition.example).map(
+                    ([param_name, example]) => ({ param_name, example })
+                  ),
+                },
+              },
+            ],
+          },
+        });
+        if (res.ok) return { ok: true, status: String(res.body?.status ?? "PENDING") };
+
+        const meta = metaError(res.body);
+        if (TEMPLATE_EXISTS_SUBCODES.has(Number(meta?.subcode)) || /already exists/i.test(meta?.message ?? "")) {
+          return { ok: true, existing: true };
+        }
+        log("embedded_signup_template_failed", {
+          metaCode: meta?.code ?? null,
+          metaSubcode: meta?.subcode ?? null,
+          metaMessage: meta?.message ?? null,
+        });
+        return { ok: false, meta };
+      } catch (err) {
+        logError("embedded_signup_unreachable", err, { step: "template" });
+        return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR };
+      }
     },
 
     /**

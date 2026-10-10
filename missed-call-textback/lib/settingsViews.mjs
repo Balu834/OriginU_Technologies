@@ -209,6 +209,20 @@ export function whatsappSettingsPage({
 } = {}) {
   const connected = status === "CONNECTED";
 
+  // Embedded Signup tokens expire. An expired one cannot send and cannot be
+  // refreshed, so the page has to say so and offer the Connect button again
+  // rather than keep showing a green tick over a dead connection.
+  const expiresAtMs = Date.parse(integration?.connectionExpiresAt ?? integration?.tokenExpiresAt ?? "");
+  const tokenIsExpired = Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
+  const expiryDate = Number.isFinite(expiresAtMs) ? new Date(expiresAtMs).toISOString().slice(0, 10) : "";
+
+  const TEMPLATE_STATES = {
+    submitted: "Sent to Meta for approval. This usually takes minutes, sometimes up to a day. Missed-call messages start working once Meta approves it.",
+    existing: "Already set up in your WhatsApp account.",
+    failed: "Could not be created automatically. Contact support and we will set it up for you.",
+  };
+  const templateLine = TEMPLATE_STATES[integration?.template?.state] ?? "";
+
   // `status` is the persisted integration state handed in by the route.
   // Nothing on this page infers state from a class name or a rendered
   // string — the markup reflects the record, never the other way round.
@@ -243,6 +257,8 @@ export function whatsappSettingsPage({
         <dt>Business</dt><dd>${escapeHtml(business?.name || "—")}</dd>
         <dt>WhatsApp</dt><dd>${escapeHtml(integration?.displayPhoneNumber || "Connected number")}</dd>
         <dt>Status</dt><dd><span class="state CONNECTED">Connected</span></dd>
+        ${templateLine ? `<dt>Message template</dt><dd>${escapeHtml(templateLine)}</dd>` : ""}
+        ${expiryDate && !tokenIsExpired ? `<dt>Renews by</dt><dd>${escapeHtml(expiryDate)} (renews automatically while you are receiving missed calls)</dd>` : ""}
       </dl>
       ${canManage
         ? `<div class="actions">
@@ -297,6 +313,16 @@ export function whatsappSettingsPage({
                 <button type="submit">Test Connection</button>
               </form>`
            : ""}
+       </div>`
+    : "";
+
+  const expiredCard = tokenIsExpired
+    ? `<div class="card" style="margin-bottom:12px;border-color:var(--urgent)">
+         <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">Your WhatsApp connection has expired.</h2>
+         <p class="hint" style="margin:0">
+           Meta's permission for this connection ran out on ${escapeHtml(expiryDate)}, so missed-call
+           messages are not being sent. Press Connect WhatsApp below to renew it. Your leads and settings are kept.
+         </p>
        </div>`
     : "";
 
@@ -375,12 +401,14 @@ export function whatsappSettingsPage({
     </div>
     ${notice}
     ${failureNotice}
-    ${connected
+    ${connected && !tokenIsExpired
       ? `${success}${steps}`
+      : connected
+      ? `${expiredCard}${connectCard}`
       : `${connectCard}${interim}<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
     ${advanced}
     ${settingsNav("/settings/whatsapp")}`,
-    canManage && signup?.available && !connected ? embeddedSignupScript(signup) : "",
+    canManage && signup?.available && (!connected || tokenIsExpired) ? embeddedSignupScript(signup) : "",
     { active: "/settings/whatsapp", business: shellBusiness ?? business, actor });
 }
 
