@@ -3,6 +3,8 @@
  *
  *   POST /settings/whatsapp/connect   the browser hands back what Meta gave it
  *   POST /settings/whatsapp/test      ask Meta again whether it still works
+ *   POST /settings/whatsapp/templates create any of our message templates the WABA lacks
+ *   POST /settings/whatsapp/send-test send the missed-call message to a number the owner types
  *
  * Both reuse the existing machinery rather than adding a second way to do
  * anything: the same session -> membership -> role authorization as every
@@ -28,8 +30,9 @@
  */
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
-import { embeddedSignupConfig, SIGNUP_FAILURES, signupMessage } from "../lib/embeddedSignup.mjs";
+import { embeddedSignupConfig, SIGNUP_FAILURES, signupMessage, TEMPLATE_DEFINITIONS } from "../lib/embeddedSignup.mjs";
 import { expiryFromSeconds } from "../lib/integrations.mjs";
+import { reportMissedCall } from "./missedCall.mjs";
 import { log, logError } from "../lib/logger.mjs";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
@@ -284,6 +287,93 @@ export async function handleWhatsappTest(ctx, deps) {
   });
 
   return redirect(`/settings/whatsapp?v=${encodeURIComponent(result.ok ? "ok" : result.reason)}`);
+}
+
+/**
+ * POST /settings/whatsapp/templates — create the message templates this
+ * platform knows the wording of, in the connected business's own WABA.
+ *
+ * Connecting already asks for the missed-call template, but that request
+ * is best-effort and the only way to retry it was to connect all over
+ * again. This asks for every template in TEMPLATE_DEFINITIONS; one Meta
+ * already has is reported as existing, never as an error.
+ *
+ * Creating a template only SUBMITS it — Meta approves it afterwards — so
+ * the redirect carries three counts and the page says "sent for approval",
+ * never "ready". No template name, WABA id or token is put in the URL.
+ */
+export async function handleWhatsappTemplates(ctx, deps) {
+  const actor = await actorFor(ctx, deps);
+  if (!actor?.businessId) return redirect(SIGN_IN);
+
+  if (!can(actor.role, "manageSettings")) {
+    log("settings_change_denied", { role: actor.role });
+    return redirect("/settings/whatsapp");
+  }
+
+  const integration = await deps.integrations.forBusiness(actor.businessId);
+  if (!integration?.wabaId || !deps.embeddedSignup?.ensureTemplate) {
+    return redirect(`/settings/whatsapp?e=${SIGNUP_FAILURES.MISSING_ASSETS}`);
+  }
+
+  const accessToken = deps.integrations.secretsOf(integration)?.accessToken ?? "";
+  const language = deps.config?.WHATSAPP_TEMPLATE_LANGUAGE || "en";
+  const missedCallTemplate = deps.config?.WHATSAPP_MISSED_CALL_TEMPLATE || "missed_call_immediate";
+
+  const counts = { submitted: 0, existing: 0, failed: 0 };
+  let current = integration;
+  for (const name of Object.keys(TEMPLATE_DEFINITIONS)) {
+    const result = await deps.embeddedSignup.ensureTemplate(integration.wabaId, accessToken, { name, language });
+    const state = result.ok ? (result.existing ? "existing" : "submitted") : "failed";
+    counts[state] += 1;
+    // The settings page reports on the one template sends depend on.
+    if (name === missedCallTemplate && deps.integrations.noteTemplate) {
+      current = await deps.integrations.noteTemplate(current, { name, state });
+    }
+  }
+
+  log("whatsapp_templates_requested", { businessId: actor.businessId, ...counts });
+  return redirect(`/settings/whatsapp?t=${counts.submitted}.${counts.existing}.${counts.failed}`);
+}
+
+/**
+ * POST /settings/whatsapp/send-test — "show me what my callers get".
+ *
+ * Sends the business's own missed-call template to a number the signed-in
+ * owner types, through reportMissedCall() — the same path the phone
+ * automation uses, so the 10-minute dedupe, the plan allowance and the
+ * usage count all apply. It is a real send, and the page says so.
+ *
+ * The number travels in the form body and is never put in the redirect;
+ * the URL carries one marker from a fixed list.
+ */
+export async function handleWhatsappSendTest(ctx, deps) {
+  const actor = await actorFor(ctx, deps);
+  if (!actor?.businessId) return redirect(SIGN_IN);
+
+  if (!can(actor.role, "manageSettings")) {
+    log("settings_change_denied", { role: actor.role });
+    return redirect("/settings/whatsapp");
+  }
+
+  const business = deps.businesses?.byId(actor.businessId) ?? null;
+  if (!business) return redirect("/settings/whatsapp");
+
+  const typed = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "").get("number") ?? "";
+  const callerNumber = typed.replace(/[\s()-]/g, "");
+
+  const result = await reportMissedCall(business, { callerNumber }, deps);
+  const body = result.body ?? {};
+  const outcome = body.sent ? "sent"
+    : body.deduped ? "wait"
+    : body.reason ? "own"
+    : result.status === 400 ? "number"
+    : result.status === 402 ? "limit"
+    : result.status === 503 ? "unconnected"
+    : "failed";
+
+  log("whatsapp_test_message", { businessId: actor.businessId, outcome });
+  return redirect(`/settings/whatsapp?m=${outcome}`);
 }
 
 /**

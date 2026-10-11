@@ -24,8 +24,7 @@ function extractBearerToken(authHeader) {
  * Auth: `Authorization: Bearer <MISSED_CALL_API_KEY>`.
  */
 export async function handleMissedCall(ctx, deps) {
-  let { config, store } = deps;
-  const { wa, businesses } = deps;
+  const { config, businesses } = deps;
   const token = extractBearerToken(ctx.headers.authorization);
 
   // The API key identifies which business the automation belongs to, so
@@ -36,6 +35,23 @@ export async function handleMissedCall(ctx, deps) {
   if (!authorised) {
     return { status: 401, body: { error: "unauthorized" } };
   }
+
+  return reportMissedCall(business, ctx.json ?? {}, deps);
+}
+
+/**
+ * One missed call for one business: validate, dedupe, check the plan's
+ * allowance, send the template, record it.
+ *
+ * Split from the handler so the signed-in "Send a test message" button
+ * goes through exactly this path — same dedupe window, same allowance,
+ * same usage count — rather than a second way of sending that could drift.
+ * The caller has already established which business this is; nothing in
+ * `input` can change it.
+ */
+export async function reportMissedCall(business, input, deps) {
+  let { config, store } = deps;
+  const { wa } = deps;
 
   if (business) {
     store = scopedToBusiness(store, business.id);
@@ -52,7 +68,7 @@ export async function handleMissedCall(ctx, deps) {
     };
   }
 
-  const { callerNumber, timestamp } = ctx.json ?? {};
+  const { callerNumber, timestamp } = input ?? {};
 
   if (!callerNumber || !isValidE164(callerNumber)) {
     return { status: 400, body: { error: "callerNumber must be a valid E.164 phone number, e.g. +919876543210" } };

@@ -54,6 +54,14 @@
       "destination": "/api/app"
     },
     {
+      "source": "/settings/whatsapp/templates",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/whatsapp/send-test",
+      "destination": "/api/app"
+    },
+    {
       "source": "/settings/team",
       "destination": "/api/app"
     },

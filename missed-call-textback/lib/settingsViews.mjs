@@ -204,7 +204,7 @@ export function onboardingPage({ error } = {}) {
  */
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
-  error, verification = null, failure = null, signup = null,
+  error, verification = null, failure = null, signup = null, templates = null, testMessage = null,
   business: shellBusiness = null, actor = null,
 } = {}) {
   const connected = status === "CONNECTED";
@@ -230,6 +230,27 @@ export function whatsappSettingsPage({
     ? `<div class="card" style="margin-bottom:12px">
          <p class="hint" style="margin:0">
            ${verification.ok ? "✓ " : "✕ "}${escapeHtml(verification.message)}
+         </p>
+       </div>`
+    : "";
+
+  const testMessageNotice = testMessage
+    ? `<div class="card" style="margin-bottom:12px${testMessage.ok ? "" : ";border-color:var(--urgent)"}">
+         <p class="hint" style="margin:0">${testMessage.ok ? "✓ " : "✕ "}${escapeHtml(testMessage.message)}</p>
+       </div>`
+    : "";
+
+  // What the "Create message templates" button just did. Three counts,
+  // each said in a sentence; "sent for approval" is never called "ready".
+  const plural = (n) => `${n} message template${n === 1 ? "" : "s"}`;
+  const templatesNotice = templates
+    ? `<div class="card" style="margin-bottom:12px${templates.failed ? ";border-color:var(--urgent)" : ""}">
+         <p class="hint" style="margin:0">
+           ${[
+             templates.submitted ? `✓ ${plural(templates.submitted)} created and sent to Meta for approval.` : "",
+             templates.existing ? `${plural(templates.existing)} already in your WhatsApp account.` : "",
+             templates.failed ? `✕ ${plural(templates.failed)} could not be created. Try again, or contact support.` : "",
+           ].filter(Boolean).join(" ")}
          </p>
        </div>`
     : "";
@@ -265,8 +286,26 @@ export function whatsappSettingsPage({
              <form method="POST" action="/settings/whatsapp/test">
                <button type="submit">Test Connection</button>
              </form>
+             <form method="POST" action="/settings/whatsapp/templates">
+               <button type="submit">Create message templates</button>
+             </form>
              <a class="btn-link ghost" href="/dashboard">Continue to Dashboard</a>
-           </div>`
+           </div>
+           <p class="hint" style="margin-top:10px">
+             Create message templates adds MissedCall's message templates to your WhatsApp
+             account if any are missing. Meta reviews a new template before it can be sent.
+           </p>
+           <form method="POST" action="/settings/whatsapp/send-test" style="margin-top:16px">
+             <label class="field" for="test-number">Send a test message</label>
+             <div class="actions">
+               <input type="tel" id="test-number" name="number" placeholder="+919876543210" autocomplete="off" required style="max-width:240px">
+               <button type="submit">Send test message</button>
+             </div>
+           </form>
+           <p class="hint" style="margin-top:10px">
+             Sends your missed-call message to this number exactly as a caller receives it.
+             It is a real WhatsApp message and counts as one on your plan.
+           </p>`
         : `<p class="hint" style="margin-top:14px">Your role (${escapeHtml(role || "STAFF")}) can view this connection but not change it.</p>`}
     </div>`;
 
@@ -406,6 +445,8 @@ export function whatsappSettingsPage({
       <a class="backlink" href="/leads">Leads</a>
     </div>
     ${notice}
+    ${templatesNotice}
+    ${testMessageNotice}
     ${failureNotice}
     ${connected && !tokenIsExpired
       ? `${success}${steps}`

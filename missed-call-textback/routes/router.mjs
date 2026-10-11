@@ -27,7 +27,9 @@ import { handleCreateSubscription } from "./billingCheckout.mjs";
 import { handleBillingStatus } from "./billingStatus.mjs";
 import { handleOverview } from "./overview.mjs";
 import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./businessSettings.mjs";
-import { handleWhatsappConnect, handleWhatsappTest } from "./whatsappConnect.mjs";
+import {
+  handleWhatsappConnect, handleWhatsappTest, handleWhatsappTemplates, handleWhatsappSendTest,
+} from "./whatsappConnect.mjs";
 import { handlePrivacy, handleTerms, handleDataDeletion } from "./legal.mjs";
 import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
 
@@ -35,7 +37,7 @@ import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
-  "/settings/business", "/settings/whatsapp/test", "/settings/phone/key",
+  "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/phone/key",
 ]);
 
 const ROUTES = [
@@ -64,6 +66,8 @@ const ROUTES = [
   ["POST", "/settings/whatsapp", handleWhatsappSettingsPost],
   ["POST", "/settings/whatsapp/connect", handleWhatsappConnect],
   ["POST", "/settings/whatsapp/test", handleWhatsappTest],
+  ["POST", "/settings/whatsapp/templates", handleWhatsappTemplates],
+  ["POST", "/settings/whatsapp/send-test", handleWhatsappSendTest],
   ["GET", "/settings/phone", handlePhoneSetupGet],
   ["POST", "/settings/phone/key", handlePhoneKeyPost],
   ["GET", "/settings/billing", handleBillingGet],

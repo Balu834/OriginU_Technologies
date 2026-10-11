@@ -143,6 +143,8 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
       status: connection,
       onboarding: onboardingStatus(business ?? {}, { connection }),
       verification: verificationNotice(ctx.query?.get("v")),
+      templates: templatesNotice(ctx.query?.get("t")),
+      testMessage: testMessageNotice(ctx.query?.get("m")),
       // A Meta flow that didn't finish, as one of OUR sentences. The
       // marker is looked up in a fixed table, so a crafted ?e= can only
       // produce a message this codebase already contains.
@@ -155,6 +157,32 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
       actor,
     }),
   };
+}
+
+/**
+ * Turns the ?t= marker left by the templates route into three counts.
+ * Anything that is not exactly "n.n.n" is ignored, so a crafted value can
+ * only ever produce small numbers in one of our own sentences.
+ */
+function templatesNotice(marker) {
+  const m = /^(\d{1,2})\.(\d{1,2})\.(\d{1,2})$/.exec(String(marker ?? ""));
+  if (!m) return null;
+  return { submitted: Number(m[1]), existing: Number(m[2]), failed: Number(m[3]) };
+}
+
+/** What the "Send test message" button did, as one of our own sentences. */
+const TEST_MESSAGE_OUTCOMES = {
+  sent: { ok: true, message: "Test message sent. It should arrive on WhatsApp within a few seconds." },
+  wait: { ok: false, message: "A message went to that number in the last 10 minutes, so this one was not sent. Try again later." },
+  own: { ok: false, message: "That is the number your leads are sent to, so no message was sent. Use a different number." },
+  number: { ok: false, message: "Enter the number with its country code, for example +919876543210." },
+  limit: { ok: false, message: "Your plan's monthly message limit has been reached, so the test was not sent." },
+  unconnected: { ok: false, message: "WhatsApp is not connected for this business yet, so nothing could be sent." },
+  failed: { ok: false, message: "WhatsApp did not accept the message. Check that the number is on WhatsApp and try again." },
+};
+
+function testMessageNotice(marker) {
+  return Object.hasOwn(TEST_MESSAGE_OUTCOMES, marker ?? "") ? TEST_MESSAGE_OUTCOMES[marker] : null;
 }
 
 /** Turns the ?v= marker left by a redirect back into something readable. */

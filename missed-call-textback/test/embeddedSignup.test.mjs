@@ -26,7 +26,9 @@ import {
 import { loadBusinessRegistry, businessRecord, onboardingStatus } from "../lib/businesses.mjs";
 import { createSession, COOKIE_NAME, hashPassword } from "../lib/auth.mjs";
 import { handleWhatsappSettingsGet, handleWhatsappSettingsPost } from "../routes/accounts.mjs";
-import { handleWhatsappConnect, handleWhatsappTest } from "../routes/whatsappConnect.mjs";
+import {
+  handleWhatsappConnect, handleWhatsappTest, handleWhatsappTemplates, handleWhatsappSendTest,
+} from "../routes/whatsappConnect.mjs";
 import { handleWebhookPost } from "../routes/webhook.mjs";
 import { overviewPage } from "../lib/overviewView.mjs";
 import { TEST_CONFIG, createFakeWa, signBody } from "./helpers.mjs";
@@ -58,7 +60,7 @@ const ALL_SECRETS = [TOKEN_A, TOKEN_B, CODE_A, CODE_B, APP_SECRET];
  * token reaches their own number" are separate, independently falsifiable
  * facts.
  */
-function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], failExchange = false, grants = {} } = {}) {
+function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], failExchange = false, grants = {}, templateNames = null } = {}) {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     const u = String(url);
@@ -96,6 +98,17 @@ function fakeGraph({ codes = {}, numbers = {}, wabas = {}, validTokens = [], fai
 
     if (u.endsWith("/subscribed_apps")) return json(200, { success: true });
     if (u.endsWith("/register")) return json(200, { success: true });
+
+    // `templateNames` is the set of templates the WABA already has. Left
+    // null, template creation is not modelled at all (the older tests).
+    if (templateNames && u.endsWith("/message_templates") && method === "POST") {
+      const name = JSON.parse(options.body).name;
+      if (templateNames.has(name)) {
+        return json(400, { error: { message: "Content in this language already exists", code: 100, error_subcode: 2388024, fbtrace_id: "T4" } });
+      }
+      templateNames.add(name);
+      return json(200, { id: `tpl-${name}`, status: "PENDING", category: "UTILITY" });
+    }
 
     const wabaMatch = /\/(\d+)\/phone_numbers/.exec(u);
     if (wabaMatch) {
@@ -832,4 +845,148 @@ test("a token granted no WhatsApp account connects nothing", async () => {
   assert.equal(res.body.reason, SIGNUP_FAILURES.MISSING_ASSETS);
   assert.equal(await w.integrations.forBusiness(w.bizA.id), null);
   assert.ok(!JSON.stringify(res.body).includes(TOKEN_A), "no token in the response");
+});
+
+// ---------------------------------------------- creating message templates
+
+const createTemplates = (w, session) =>
+  handleWhatsappTemplates(jsonCtx({ session, pathname: "/settings/whatsapp/templates" }), w);
+
+const templatePosts = (w) =>
+  w.meta.calls.filter((c) => c.method === "POST" && c.url.endsWith("/message_templates"));
+
+test("Create message templates asks Meta for the ones the WABA lacks and reports each honestly", async () => {
+  // The WABA already has the missed-call template; the after-hours one is new.
+  const w = await buildWorld({ meta: honestMeta({ templateNames: new Set(["missed_call_immediate"]) }) });
+  const session = await sessionFor(w, w.userA);
+  await connect(w, session, GOOD_A);
+  const before = templatePosts(w).length;
+
+  const res = await createTemplates(w, session);
+
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.Location, "/settings/whatsapp?t=1.1.0", "one created, one already there, none failed");
+  const posts = templatePosts(w).slice(before);
+  assert.deepEqual(posts.map((c) => c.body.name).sort(), ["missed_call_after_hours", "missed_call_immediate"]);
+  for (const c of posts) {
+    assert.ok(c.url.includes(`/${WABA_A}/message_templates`), "created in the business's own WABA");
+    assert.equal(c.token, TOKEN_A, "with the business's own token");
+    assert.equal(c.body.category, "UTILITY");
+  }
+
+  const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t: "1.1.0" } }), w)).html;
+  assert.match(page, /1 message template created and sent to Meta for approval\./);
+  assert.match(page, /1 message template already in your WhatsApp account\./);
+  assert.match(page, /action="\/settings\/whatsapp\/templates"/, "the connected page offers the button");
+});
+
+test("a second press creates nothing new, and a failure is said plainly", async () => {
+  const w = await buildWorld({ meta: honestMeta({ templateNames: new Set() }) });
+  const session = await sessionFor(w, w.userA);
+  await connect(w, session, GOOD_A);
+
+  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=1.1.0");
+  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=0.2.0");
+
+  const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t: "0.0.2" } }), w)).html;
+  assert.match(page, /2 message templates could not be created/);
+  assert.doesNotMatch(page, /sent to Meta for approval\.<\/p>|created and sent/, "nothing is claimed to have been created");
+});
+
+test("only someone who can manage settings may create templates, and never for another business", async () => {
+  const w = await buildWorld({ meta: honestMeta({ templateNames: new Set() }) });
+  const owner = await sessionFor(w, w.userA);
+  await connect(w, owner, GOOD_A);
+  const before = templatePosts(w).length;
+
+  const staff = await createTemplates(w, await staffSessionFor(w));
+  assert.equal(staff.headers.Location, "/settings/whatsapp");
+
+  const signedOut = await createTemplates(w, null);
+  assert.equal(signedOut.status, 302);
+
+  // B is signed in but has connected nothing: there is no WABA to write to.
+  const other = await createTemplates(w, await sessionFor(w, w.userB));
+  assert.match(other.headers.Location, /^\/settings\/whatsapp\?e=/);
+
+  assert.equal(templatePosts(w).length, before, "no template was requested by any of the three");
+});
+
+test("a crafted ?t= marker cannot put anything on the page", async () => {
+  const w = await buildWorld();
+  const session = await sessionFor(w, w.userA);
+  for (const t of ["<script>", "1.1", "999.0.0", "a.b.c", "1.1.0.1"]) {
+    const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t } }), w)).html;
+    assert.doesNotMatch(page, /message templates? (created|already|could not)/, `?t=${t} produced a notice`);
+  }
+});
+
+// ------------------------------------------------- sending a test message
+
+/**
+ * The send itself is exercised with the shared fake client: with no
+ * integration layer wired, clientForBusiness hands back `wa`, so nothing
+ * here reaches the network.
+ */
+function sendTest(w, session, number) {
+  const ctx = {
+    method: "POST", pathname: "/settings/whatsapp/send-test",
+    query: new URLSearchParams(),
+    headers: session ? { cookie: `${COOKIE_NAME}=${session}` } : {},
+    rawBody: Buffer.from(new URLSearchParams({ number }).toString()),
+  };
+  return handleWhatsappSendTest(ctx, { ...w, integrations: undefined });
+}
+
+test("Send test message sends this business's own missed-call template to the typed number", async () => {
+  const w = await buildWorld();
+  const session = await sessionFor(w, w.userA);
+
+  const res = await sendTest(w, session, "+91 98765 00011");
+
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.Location, "/settings/whatsapp?m=sent");
+  assert.ok(!res.headers.Location.includes("98765"), "the number is never put in the URL");
+  assert.equal(w.wa.sent.length, 1);
+  assert.deepEqual(
+    { kind: w.wa.sent[0].kind, to: w.wa.sent[0].to, name: w.wa.sent[0].bodyParams.business_name },
+    { kind: "template", to: "+919876500011", name: "Alpha Electrical" },
+  );
+});
+
+test("a second test to the same number inside the dedupe window is refused, and said so", async () => {
+  const w = await buildWorld();
+  const session = await sessionFor(w, w.userA);
+
+  await sendTest(w, session, CUSTOMER);
+  const again = await sendTest(w, session, CUSTOMER);
+
+  assert.equal(again.headers.Location, "/settings/whatsapp?m=wait");
+  assert.equal(w.wa.sent.length, 1, "the repeat sent nothing");
+});
+
+test("a bad number, the owner's own number, and a member who cannot manage settings all send nothing", async () => {
+  const w = await buildWorld();
+  const owner = await sessionFor(w, w.userA);
+
+  assert.equal((await sendTest(w, owner, "98765")).headers.Location, "/settings/whatsapp?m=number");
+  assert.equal((await sendTest(w, owner, w.bizA.ownerWhatsApp)).headers.Location, "/settings/whatsapp?m=own");
+  assert.equal((await sendTest(w, await staffSessionFor(w), CUSTOMER)).headers.Location, "/settings/whatsapp");
+  assert.equal((await sendTest(w, null, CUSTOMER)).status, 302);
+
+  assert.equal(w.wa.sent.length, 0);
+});
+
+test("the settings page says what the test send did, and only for markers it knows", async () => {
+  const w = await buildWorld();
+  const session = await sessionFor(w, w.userA);
+  await connect(w, session, GOOD_A);
+  const page = async (m) => (await handleWhatsappSettingsGet(pageCtx({ session, query: { m } }), w)).html;
+
+  assert.match(await page("sent"), /Test message sent\./);
+  assert.match(await page("wait"), /in the last 10 minutes/);
+  assert.match(await page("sent"), /action="\/settings\/whatsapp\/send-test"/);
+  for (const m of ["constructor", "__proto__", "<script>", "SENT"]) {
+    assert.doesNotMatch(await page(m), /Test message sent|was not sent|did not accept/, `?m=${m} produced a notice`);
+  }
 });
