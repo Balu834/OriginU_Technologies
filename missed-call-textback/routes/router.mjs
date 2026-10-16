@@ -32,12 +32,14 @@ import {
 } from "./whatsappConnect.mjs";
 import { handlePrivacy, handleTerms, handleDataDeletion } from "./legal.mjs";
 import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
+import { handleForgotGet, handleForgotPost, handleResetGet, handleResetPost } from "./passwordReset.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
   "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/phone/key",
+  "/forgot-password", "/reset-password",
 ]);
 
 const ROUTES = [
@@ -56,6 +58,10 @@ const ROUTES = [
   ["GET", "/login", handleLoginPage],
   ["POST", "/login", handleLogin],
   ["POST", "/logout", handleLogout],
+  ["GET", "/forgot-password", handleForgotGet],
+  ["POST", "/forgot-password", handleForgotPost],
+  ["GET", "/reset-password", handleResetGet],
+  ["POST", "/reset-password", handleResetPost],
   ["GET", "/signup", handleSignupGet],
   ["POST", "/signup", handleSignupPost],
   ["GET", "/onboarding", handleOnboardingGet],

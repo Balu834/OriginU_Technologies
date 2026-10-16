@@ -63,6 +63,13 @@ export function loadConfig(env = process.env, dir = here) {
     WHATSAPP_REGISTER_PIN: merged.WHATSAPP_REGISTER_PIN ?? "",
     MOHAMED_WHATSAPP_NUMBER: merged.MOHAMED_WHATSAPP_NUMBER ?? "",
     WEBHOOK_BASE_URL: merged.WEBHOOK_BASE_URL ?? "",
+    // Password-reset email via Resend's REST API. Both keys plus a public
+    // base URL are needed, or the forgot-password page says email reset is
+    // unavailable instead of pretending to send. The link host comes from
+    // config, never from the request's Host header.
+    RESEND_API_KEY: merged.RESEND_API_KEY ?? "",
+    RESET_EMAIL_FROM: merged.RESET_EMAIL_FROM ?? "",
+    PUBLIC_BASE_URL: merged.PUBLIC_BASE_URL ?? "",
     MISSED_CALL_API_KEY: merged.MISSED_CALL_API_KEY ?? "",
     WHATSAPP_MISSED_CALL_TEMPLATE: merged.WHATSAPP_MISSED_CALL_TEMPLATE ?? "missed_call_immediate",
     WHATSAPP_TEMPLATE_LANGUAGE: merged.WHATSAPP_TEMPLATE_LANGUAGE ?? "en",

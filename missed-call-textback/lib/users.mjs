@@ -105,6 +105,15 @@ export function createAccountService(store) {
       return ok && user ? user : null;
     },
 
+    /** Replaces a user's password. False for an unknown user or an unacceptable password. */
+    async setPassword(userId, password) {
+      if (!isAcceptablePassword(password)) return false;
+      const user = await store.getUser(userId);
+      if (!user) return false;
+      await store.saveUser({ ...user, passwordHash: hashPassword(password), updatedAt: new Date().toISOString() });
+      return true;
+    },
+
     /**
      * Creates a business and makes its creator OWNER. The role is set
      * here, server-side — a client cannot nominate itself OWNER because

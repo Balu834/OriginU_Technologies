@@ -240,7 +240,7 @@ function page(title, body, { active = "", business = null, actor = null, actions
 }
 
 /** Sign-in has no session, so it gets no shell — just a centred card. */
-function barePage(title, body) {
+export function barePage(title, body) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -252,7 +252,7 @@ function barePage(title, body) {
 </head><body><div class="wrap">${body}</div></body></html>`;
 }
 
-export function loginPage({ error } = {}) {
+export function loginPage({ error, notice } = {}) {
   return barePage("Sign in", `
     <div class="gate">
       <div class="plate">MissedCall</div>
@@ -265,8 +265,10 @@ export function loginPage({ error } = {}) {
         <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
         <button type="submit">Sign in</button>
         ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+        ${notice ? `<p class="sub" role="status">${escapeHtml(notice)}</p>` : ""}
       </form>
-      <p class="sub" style="margin-top:16px">No account? <a href="/signup">Create one</a>.</p>
+      <p class="sub" style="margin-top:16px"><a href="/forgot-password">Forgot password?</a></p>
+      <p class="sub" style="margin-top:8px">No account? <a href="/signup">Create one</a>.</p>
     </div>`);
 }
 

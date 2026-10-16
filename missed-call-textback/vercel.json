@@ -124,6 +124,14 @@
     {
       "source": "/settings/phone/key",
       "destination": "/api/app"
+    },
+    {
+      "source": "/forgot-password",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/api/app"
     }
   ]
 }
