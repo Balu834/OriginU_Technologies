@@ -80,8 +80,9 @@ export async function handleOnboardingGet(ctx, deps) {
   const session = await currentSession(ctx, deps.store);
   if (!session?.userId) return redirect("/signup");
 
-  const memberships = await deps.accounts.membershipsOf(session.userId);
-  if (memberships.length) return redirect("/leads");
+  // Only bounce to the dashboard when it will actually accept this session;
+  // otherwise /leads sends them straight back here and the browser loops.
+  if (await resolveActor(session, deps.accounts)) return redirect("/leads");
   return { status: 200, html: onboardingPage() };
 }
 

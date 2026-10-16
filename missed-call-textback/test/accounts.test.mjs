@@ -9,7 +9,7 @@ import { createIntegrationService, publicView } from "../lib/integrations.mjs";
 import { createBusinessRegistry, businessRecord } from "../lib/businesses.mjs";
 import { createSession, COOKIE_NAME, verifyPassword } from "../lib/auth.mjs";
 import {
-  handleSignupPost, handleOnboardingPost,
+  handleSignupPost, handleOnboardingGet, handleOnboardingPost,
   handleWhatsappSettingsGet, handleWhatsappSettingsPost,
   handleTeamGet, handleTeamPost,
 } from "../routes/accounts.mjs";
@@ -139,6 +139,33 @@ test("resolveActor derives role from the stored membership, not the session", as
   // A session claiming ADMIN must not confer it.
   const actor = await resolveActor({ userId: user.id, businessId: business.id, role: "ADMIN" }, d.accounts);
   assert.equal(actor.role, "OWNER", "the membership is authoritative");
+});
+
+test("a session minted before the business existed resolves to the user's membership", async () => {
+  const d = deps();
+  const { user, business } = await signedUpUser(d, "a@example.com");
+  // Signup issues a session with no business; the business is created later
+  // (another tab, or a team invite accepted afterwards).
+  const actor = await resolveActor({ userId: user.id, businessId: null }, d.accounts);
+  assert.equal(actor.businessId, business.id);
+  assert.equal(actor.role, "OWNER");
+});
+
+test("a no-business session never borrows another user's membership", async () => {
+  const d = deps();
+  await signedUpUser(d, "a@example.com");
+  const stranger = await d.accounts.signUp({ email: "b@example.com", password: PW });
+  assert.equal(await resolveActor({ userId: stranger.id, businessId: null }, d.accounts), null);
+});
+
+test("onboarding does not bounce to /leads when the session cannot use the dashboard (no redirect loop)", async () => {
+  const d = deps();
+  const { user } = await signedUpUser(d, "a@example.com");
+  // Pinned to a business the user is not a member of: /leads would send them
+  // back to /onboarding, so /onboarding must not send them to /leads.
+  const sid = await createSession(d.store, "someone-elses", { userId: user.id });
+  const res = await handleOnboardingGet({ headers: { cookie: `${COOKIE_NAME}=${sid}` } }, d);
+  assert.equal(res.status, 200);
 });
 
 test("a session for a business the user has no membership in resolves to nothing", async () => {

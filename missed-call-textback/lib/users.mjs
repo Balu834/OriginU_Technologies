@@ -174,7 +174,19 @@ export async function resolveActor(session, accounts) {
   // and an unverifiable user session must not be trusted.
   if (!accounts) return null;
 
-  const membership = await accounts.membershipFor(session.userId, session.businessId);
+  let membership;
+  if (session.businessId) {
+    // A session pinned to a business is honoured only while that
+    // membership exists; it never silently becomes another tenant.
+    membership = await accounts.membershipFor(session.userId, session.businessId);
+  } else {
+    // A session minted before the user had a business (signup, or a team
+    // invite accepted later) carries no businessId. It used to resolve to
+    // no tenant while onboarding saw the membership and bounced back — an
+    // endless /leads <-> /onboarding redirect. The fallback comes from the
+    // stored membership, never from the request.
+    membership = ((await accounts.membershipsOf(session.userId)) ?? [])[0] ?? null;
+  }
   if (!membership) return null;
   return { user: { id: session.userId }, businessId: membership.businessId, role: membership.role, legacy: false };
 }
