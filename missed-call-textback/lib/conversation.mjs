@@ -79,10 +79,18 @@ export async function handleInboundMessage(
   { store, wa, config, templates, context = null }
 ) {
   const existing = await store.getConversation(from);
+  // A new missed call since this conversation last moved means the customer
+  // is starting over: they were sent a fresh "what do you need?" template,
+  // so their reply answers that, not whatever the abandoned run was still
+  // waiting for (otherwise "ac not cooling" gets taken as their name).
+  const lastMissedCall = store.lastMissedCallAt ? await store.lastMissedCallAt(from) : null;
+  const restartedByNewCall = Boolean(
+    existing && lastMissedCall && lastMissedCall > Date.parse(existing.updatedAt)
+  );
   // A reply after the lead is already complete is a new job, not more
   // detail for the old one — start clean rather than re-completing (and
   // re-notifying the owner about) the same lead on every later message.
-  const conversation = !existing || existing.completed ? freshConversation(from) : existing;
+  const conversation = !existing || existing.completed || restartedByNewCall ? freshConversation(from) : existing;
   // Conversations written before run ids existed have none; they stay
   // null and their messages remain unattributable, which is the honest
   // outcome rather than inventing an association after the fact.
