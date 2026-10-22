@@ -66,6 +66,44 @@ test("full step-by-step conversation reaches a completed lead without repeating 
   assert.match(ownerMsg.body, /Urgency: Today/);
 });
 
+test("a new missed call restarts an abandoned conversation instead of continuing it", async () => {
+  const deps = createTestDeps();
+  const from = "+919876543210";
+
+  // An earlier run stalls waiting for the name.
+  await handleInboundMessage({ from, text: "Fan not working" }, deps);
+  await handleInboundMessage({ from, text: "Kukatpally" }, deps);
+  assert.match(deps.wa.sent.at(-1).body, /name/i);
+
+  // Later the same customer calls again, misses us, and gets a fresh template.
+  await deps.store.markMissedCall(from, Date.now() + 1000);
+
+  // Their reply is the new problem, not the name the old run was waiting for.
+  const result = await handleInboundMessage({ from, text: "ac not cooling" }, deps);
+  assert.equal(result.leadCompleted, false);
+  const reply = deps.wa.sent.at(-1).body;
+  assert.doesNotMatch(reply, /ac not cooling/i, "the problem must not be echoed back as the customer's name");
+  assert.match(reply, /area/i, "a fresh run asks for the area next");
+
+  const conversation = await deps.store.getConversation(from);
+  assert.equal(conversation.fields.problem, "ac not cooling");
+  assert.equal(conversation.fields.area, undefined, "nothing carried over from the abandoned run");
+});
+
+test("an ongoing conversation is not restarted by the missed call that started it", async () => {
+  const deps = createTestDeps();
+  const from = "+919876543210";
+
+  await deps.store.markMissedCall(from, Date.now() - 1000);
+  await handleInboundMessage({ from, text: "AC not cooling" }, deps);
+  await handleInboundMessage({ from, text: "Whitefield" }, deps);
+
+  const conversation = await deps.store.getConversation(from);
+  assert.equal(conversation.fields.problem, "AC not cooling");
+  assert.equal(conversation.fields.area, "Whitefield");
+  assert.equal(conversation.awaiting, "name");
+});
+
 test("a combined message completes the lead in one turn, no unnecessary follow-ups", async () => {
   const deps = createTestDeps();
   const from = "+919876543210";
