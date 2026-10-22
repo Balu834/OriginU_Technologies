@@ -3,6 +3,8 @@
  *
  *   POST /missed-call   auth'd endpoint for the phone automation (MacroDroid/
  *                       Tasker) to call the instant a call goes unanswered
+ *   GET|POST /ivr/missed-call  the same, for IVR/cloud-telephony providers:
+ *                       key as ?key= or Bearer, caller in their own field names
  *   GET  /webhook       Meta's verification handshake
  *   POST /webhook       inbound WhatsApp events — replies drive a short
  *                       conversation that fills in the lead, then notifies
@@ -31,7 +33,7 @@ import { createUsageService } from "./lib/usage.mjs";
 import { razorpayConfig, createRazorpayClient } from "./lib/razorpay.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
-import { handleMissedCall } from "./routes/missedCall.mjs";
+import { handleMissedCall, handleIvrMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
 
 import templates from "./templates.json" with { type: "json" };
@@ -74,6 +76,7 @@ export function buildApp(config) {
     if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/missed-call") return handleMissedCall(ctx, deps);
+    if ((ctx.method === "GET" || ctx.method === "POST") && ctx.pathname === "/ivr/missed-call") return handleIvrMissedCall(ctx, deps);
     return (await dispatch(ctx, deps)) ?? { status: 404, body: { error: "not found" } };
   }
 

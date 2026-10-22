@@ -1125,6 +1125,19 @@ export function phoneSetupPage({
       <p class="hint" style="margin:12px 0 0">The caller's number must reach MissedCall with its country code, like +919876543210. If your phone shows numbers without +91, add it in MacroDroid before <code>[call_number]</code>. Calls from the owner's own number are ignored, and the same caller is not messaged twice within 10 minutes.</p>
     </div>`;
 
+  const ivrEndpoint = `${String(baseUrl).replace(/\/$/, "")}/ivr/missed-call`;
+  const ivrGuide = `<div class="card">
+      <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Using an IVR or cloud number instead?</h2>
+      <p class="hint" style="margin:0 0 12px">If your calls come in through an IVR or cloud telephony provider (Exotel, Knowlarity, MyOperator, Twilio and others), they never ring an Android phone, so skip MacroDroid. Ask your provider to call this URL whenever a call is missed or not answered:</p>
+      <input readonly value="${escapeHtml(ivrEndpoint)}?key=YOUR-KEY" onclick="this.select()" style="font-family:monospace">
+      <ul class="hint" style="margin:12px 0 0;padding-left:18px;line-height:1.7">
+        <li>GET or POST both work, and the body can be a form or JSON.</li>
+        <li>The caller's number is read from the provider's own field (<code>CallFrom</code>, <code>From</code>, <code>caller_id</code>, <code>caller_number</code> and similar). Numbers without +91 are treated as Indian.</li>
+        <li>If your provider sends every call, MissedCall skips the ones a person answered (<code>DialCallStatus</code> or <code>call_status</code> set to completed/answered).</li>
+        <li>If your provider can set a header, send <code>Authorization: Bearer YOUR-KEY</code> instead of putting the key in the URL.</li>
+      </ul>
+    </div>`;
+
   return page("Phone setup", `
     <div class="masthead">
       <div>
@@ -1136,6 +1149,7 @@ export function phoneSetupPage({
     ${justCreated}
     ${keyCard}
     ${guide}
+    ${ivrGuide}
     ${settingsNav("/settings/phone")}`, "",
     { active: "/settings/phone", business, actor });
 }

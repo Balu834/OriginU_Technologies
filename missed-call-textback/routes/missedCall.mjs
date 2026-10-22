@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { isValidE164, normalizePhone } from "../lib/phone.mjs";
+import { isValidE164, normalizePhone, toE164 } from "../lib/phone.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { clientForBusiness } from "../lib/outbound.mjs";
 import { log } from "../lib/logger.mjs";
@@ -37,6 +37,85 @@ export async function handleMissedCall(ctx, deps) {
   }
 
   return reportMissedCall(business, ctx.json ?? {}, deps);
+}
+
+/** Where IVR providers put the caller's number, in the order they are tried. */
+const CALLER_FIELDS = [
+  "callerNumber", "CallFrom", "From", "caller_id", "callerid", "caller_number",
+  "customer_number", "caller", "msisdn", "mobile",
+];
+
+/**
+ * Fields that say whether a person picked up after the IVR. Only these are
+ * read: a provider's overall call status is usually "completed" for every
+ * call the IVR itself answered, missed or not, so it can't tell us anything.
+ */
+const ANSWER_STATUS_FIELDS = ["DialCallStatus", "dial_call_status", "call_status"];
+const ANSWERED = new Set(["completed", "answered", "connected", "answer"]);
+
+/**
+ * Reads an IVR request's fields from the query string and the body. Providers
+ * send GET query strings (Exotel Passthru), form posts or JSON, and none of
+ * them can be told to use our exact shape, so all three are accepted.
+ */
+function ivrFields(ctx) {
+  const fields = new Map();
+  for (const [k, v] of ctx.query ?? []) fields.set(k, v);
+
+  const raw = ctx.rawBody?.length ? ctx.rawBody.toString("utf8") : "";
+  if (raw) {
+    const type = String(ctx.headers?.["content-type"] ?? "");
+    let parsed = null;
+    if (type.includes("json") || raw.trimStart().startsWith("{")) {
+      try { parsed = JSON.parse(raw); } catch { parsed = null; }
+    }
+    if (parsed && typeof parsed === "object") {
+      for (const [k, v] of Object.entries(parsed)) if (v !== null && typeof v !== "object") fields.set(k, String(v));
+    } else {
+      for (const [k, v] of new URLSearchParams(raw)) fields.set(k, v);
+    }
+  }
+  return fields;
+}
+
+/**
+ * GET or POST /ivr/missed-call — for cloud telephony / IVR providers
+ * (Exotel, Knowlarity, MyOperator, Twilio…), whose calls never ring a phone,
+ * so the MacroDroid automation has nothing to trigger on.
+ *
+ * Auth: the same missed-call key, as `Authorization: Bearer <key>` or, since
+ * most IVR consoles can only be given a URL, as `?key=<key>`. The rest is
+ * reportMissedCall, unchanged: same dedupe, allowance and template.
+ */
+export async function handleIvrMissedCall(ctx, deps) {
+  const { config, businesses } = deps;
+  const fields = ivrFields(ctx);
+  const token = extractBearerToken(ctx.headers?.authorization) ?? fields.get("key") ?? null;
+
+  const business = businesses ? businesses.byApiKey(token, timingSafeEqualStr) : null;
+  const authorised = businesses ? Boolean(business) : token && timingSafeEqualStr(token, config.MISSED_CALL_API_KEY);
+  if (!authorised) {
+    return { status: 401, body: { error: "unauthorized" } };
+  }
+
+  // A provider that calls on every call, not just missed ones, tells us
+  // when someone answered. Those callers were spoken to; no message.
+  const answerStatus = ANSWER_STATUS_FIELDS.map((f) => fields.get(f)).find(Boolean);
+  if (answerStatus && ANSWERED.has(answerStatus.trim().toLowerCase())) {
+    log("ivr_call_answered_ignored", {});
+    return { status: 200, body: { sent: false, reason: "call was answered" } };
+  }
+
+  const rawCaller = CALLER_FIELDS.map((f) => fields.get(f)).find(Boolean);
+  const callerNumber = toE164(rawCaller);
+  if (!callerNumber) {
+    return {
+      status: 400,
+      body: { error: `no caller number found; send it as one of: ${CALLER_FIELDS.join(", ")}` },
+    };
+  }
+
+  return reportMissedCall(business, { callerNumber }, deps);
 }
 
 /**
