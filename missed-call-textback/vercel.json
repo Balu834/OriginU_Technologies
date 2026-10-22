@@ -78,6 +78,10 @@
       "destination": "/api/missed-call"
     },
     {
+      "source": "/ivr/missed-call",
+      "destination": "/api/ivr-missed-call"
+    },
+    {
       "source": "/webhook",
       "destination": "/api/webhook"
     },

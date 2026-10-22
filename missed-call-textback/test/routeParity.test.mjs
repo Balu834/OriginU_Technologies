@@ -44,6 +44,7 @@ test("every browser rewrite points at the shared app function", () => {
   const ownFunction = {
     "/health": "/api/health",
     "/missed-call": "/api/missed-call",
+    "/ivr/missed-call": "/api/ivr-missed-call",
     "/webhook": "/api/webhook",
     "/razorpay-webhook": "/api/razorpay-webhook",
   };

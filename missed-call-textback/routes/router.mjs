@@ -39,7 +39,7 @@ export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
   "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/phone/key",
-  "/forgot-password", "/reset-password",
+  "/forgot-password", "/reset-password", "/ivr/missed-call",
 ]);
 
 const ROUTES = [
