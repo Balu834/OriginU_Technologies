@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { isValidE164, normalizePhone, toE164 } from "../lib/phone.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { clientForBusiness } from "../lib/outbound.mjs";
-import { log } from "../lib/logger.mjs";
+import { log, maskPhone } from "../lib/logger.mjs";
 
 const DEDUPE_WINDOW_MS = 10 * 60 * 1000; // resending the template within 10 min of a missed call is treated as a duplicate/retry
 
@@ -33,10 +33,23 @@ export async function handleMissedCall(ctx, deps) {
   const business = businesses ? businesses.byApiKey(token, timingSafeEqualStr) : null;
   const authorised = businesses ? Boolean(business) : token && timingSafeEqualStr(token, config.MISSED_CALL_API_KEY);
   if (!authorised) {
+    // Whether a key was sent at all is what tells a missing header apart
+    // from a stale key; the key itself never reaches the log.
+    log("missed_call_unauthorized", { route: "/missed-call", hadCredential: Boolean(token) });
     return { status: 401, body: { error: "unauthorized" } };
   }
 
-  return reportMissedCall(business, ctx.json ?? {}, deps);
+  // MacroDroid's [call_number] is the number as the phone shows it:
+  // "9876543210" or "09876543210", rarely "+91…". Read it the same way the
+  // IVR route does, so a phone that never shows a country code still works.
+  const input = ctx.json ?? {};
+  const callerNumber = toE164(input.callerNumber);
+  if (!callerNumber) {
+    log("missed_call_bad_number", { route: "/missed-call", callerNumber: maskPhone(String(input.callerNumber ?? "")) });
+    return { status: 400, body: { error: "callerNumber must be a phone number, e.g. +919876543210 or 9876543210" } };
+  }
+
+  return reportMissedCall(business, { ...input, callerNumber }, deps);
 }
 
 /** Where IVR providers put the caller's number, in the order they are tried. */
@@ -95,6 +108,7 @@ export async function handleIvrMissedCall(ctx, deps) {
   const business = businesses ? businesses.byApiKey(token, timingSafeEqualStr) : null;
   const authorised = businesses ? Boolean(business) : token && timingSafeEqualStr(token, config.MISSED_CALL_API_KEY);
   if (!authorised) {
+    log("missed_call_unauthorized", { route: "/ivr/missed-call", hadCredential: Boolean(token) });
     return { status: 401, body: { error: "unauthorized" } };
   }
 
@@ -109,6 +123,7 @@ export async function handleIvrMissedCall(ctx, deps) {
   const rawCaller = CALLER_FIELDS.map((f) => fields.get(f)).find(Boolean);
   const callerNumber = toE164(rawCaller);
   if (!callerNumber) {
+    log("missed_call_bad_number", { route: "/ivr/missed-call", callerNumber: maskPhone(String(rawCaller ?? "")) });
     return {
       status: 400,
       body: { error: `no caller number found; send it as one of: ${CALLER_FIELDS.join(", ")}` },
@@ -150,18 +165,23 @@ export async function reportMissedCall(business, input, deps) {
   const { callerNumber, timestamp } = input ?? {};
 
   if (!callerNumber || !isValidE164(callerNumber)) {
+    log("missed_call_bad_number", { callerNumber: maskPhone(String(callerNumber ?? "")) });
     return { status: 400, body: { error: "callerNumber must be a valid E.164 phone number, e.g. +919876543210" } };
   }
   // Optional: a phone automation that only knows the caller's number is
   // enough, and "now" is when the call was missed. A timestamp that IS
   // sent must still be a real one — garbage is a broken client, not a default.
   if (timestamp !== undefined && timestamp !== null && timestamp !== "" && Number.isNaN(Date.parse(timestamp))) {
+    log("missed_call_bad_timestamp", {});
     return { status: 400, body: { error: "timestamp must be a valid ISO 8601 date-time" } };
   }
 
   const caller = normalizePhone(callerNumber);
 
-  if (config.MOHAMED_WHATSAPP_NUMBER && caller === normalizePhone(config.MOHAMED_WHATSAPP_NUMBER)) {
+  // Compared in E.164: an owner number saved before numbers were normalised
+  // ("9985324880") must still match the "+919985324880" a call arrives as.
+  const ownNumber = toE164(config.MOHAMED_WHATSAPP_NUMBER) ?? normalizePhone(config.MOHAMED_WHATSAPP_NUMBER);
+  if (ownNumber && caller === ownNumber) {
     log("missed_call_ignored_own_number", {});
     return { status: 200, body: { sent: false, reason: "ignored own number" } };
   }

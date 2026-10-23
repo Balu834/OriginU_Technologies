@@ -105,3 +105,25 @@ test("toE164 reads the formats IVR providers send", () => {
   assert.equal(toE164(""), null);
   assert.equal(toE164(undefined), null);
 });
+
+test("IVR rejections are logged: bad key without key material, bad number masked", async () => {
+  const deps = createTestDeps();
+  const lines = [];
+  const { log } = console;
+  console.log = (...a) => lines.push(a.join(" "));
+  try {
+    await handleIvrMissedCall(ivrCtx({ query: { key: "wrong-ivr-key", CallFrom: "09876543210" } }), deps);
+    await handleIvrMissedCall(ivrCtx({ query: { key: KEY, CallFrom: "anonymous" } }), deps);
+  } finally {
+    console.log = log;
+  }
+  const events = lines.map((l) => JSON.parse(l));
+  const unauthorized = events.find((e) => e.event === "missed_call_unauthorized");
+  assert.equal(unauthorized?.route, "/ivr/missed-call");
+  assert.equal(unauthorized.hadCredential, true);
+  assert.ok(!lines.join("").includes("wrong-ivr-key"), "the key reached the log");
+
+  const badNumber = events.find((e) => e.event === "missed_call_bad_number");
+  assert.equal(badNumber?.route, "/ivr/missed-call");
+  assert.ok(!badNumber.callerNumber.includes("anonymous"), "the raw value was logged unmasked");
+});

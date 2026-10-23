@@ -16,6 +16,7 @@ import {
   signupPage, onboardingPage, whatsappSettingsPage, teamSettingsPage,
 } from "../lib/settingsViews.mjs";
 import { log, logError } from "../lib/logger.mjs";
+import { toE164 } from "../lib/phone.mjs";
 import crypto from "node:crypto";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
@@ -107,7 +108,9 @@ export async function handleOnboardingPost(ctx, deps) {
     businessPhone: (form.get("businessPhone") ?? "").trim(),
     timezone: (form.get("timezone") ?? "Asia/Kolkata").trim(),
     ownerName: (form.get("ownerName") ?? "").trim(),
-    ownerWhatsApp: (form.get("ownerWhatsApp") ?? "").trim(),
+    // E.164 where it can be read ("9985324880" -> "+919985324880"), so lead
+    // alerts reach the owner; otherwise kept as typed, as before.
+    ownerWhatsApp: toE164(form.get("ownerWhatsApp")) ?? (form.get("ownerWhatsApp") ?? "").trim(),
     areas: (form.get("areas") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     services: (form.get("services") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   });

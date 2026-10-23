@@ -16,7 +16,7 @@
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
 import { applyBusinessProfile, publicBusiness } from "../lib/businesses.mjs";
-import { isValidE164, normalizePhone } from "../lib/phone.mjs";
+import { isValidE164, normalizePhone, toE164 } from "../lib/phone.mjs";
 import { businessSettingsPage } from "../lib/settingsViews.mjs";
 import { log, logError } from "../lib/logger.mjs";
 
@@ -80,7 +80,10 @@ export async function handleBusinessSettingsPost(ctx, deps) {
 
   const { business, errors } = applyBusinessProfile(existing, input, {
     isValidPhone: isValidE164,
-    normalizePhone,
+    // Stored in E.164 so lead alerts and the own-number filter get the same
+    // "+91…" a call arrives as. Anything toE164 can't read is passed through
+    // as typed, so the validator above still rejects it.
+    normalizePhone: (v) => toE164(v) ?? normalizePhone(v),
   });
 
   if (Object.keys(errors).length) {
