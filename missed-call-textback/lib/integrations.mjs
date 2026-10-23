@@ -127,6 +127,13 @@ export function integrationState(integration) {
   return INTEGRATION_STATUSES.includes(integration.status) ? integration.status : "NOT_CONNECTED";
 }
 
+/**
+ * The `code` on the error register() throws when another business already
+ * claims the phone number. Callers branch on this rather than on the
+ * message text, which carries a masked identifier and may be reworded.
+ */
+export const PHONE_NUMBER_CLAIMED = "PHONE_NUMBER_CLAIMED";
+
 export function createIntegrationService(store, config) {
   const key = config.INTEGRATION_ENCRYPTION_KEY;
 
@@ -220,8 +227,9 @@ export function createIntegrationService(store, config) {
       const phoneNumberId = String(input.phoneNumberId ?? "");
       const claimant = await store.getIntegrationByPhoneNumberId?.(phoneNumberId);
       if (claimant && claimant.businessId !== input.businessId) {
-        throw new Error(
-          `phone_number_id ${maskIdentifier(input.phoneNumberId)} is already registered to another business`
+        throw Object.assign(
+          new Error(`phone_number_id ${maskIdentifier(input.phoneNumberId)} is already registered to another business`),
+          { code: PHONE_NUMBER_CLAIMED }
         );
       }
 

@@ -254,6 +254,66 @@ test("one business cannot register a phone number another already owns", async (
   assert.equal(d.integrations.secretsOf(await d.integrations.forBusiness(a.business.id)).accessToken, "A");
 });
 
+// ---- settings error pages ----
+
+async function adminOf(d, business) {
+  const admin = await d.accounts.signUp({ email: "admin@example.com", password: PW });
+  await d.accounts.addMember({ businessId: business.id, email: "admin@example.com", role: "ADMIN" });
+  return `${COOKIE_NAME}=${await createSession(d.store, business.id, { userId: admin.id })}`;
+}
+
+const MANUAL_FORM = /<form method="POST" action="\/settings\/whatsapp">/;
+
+test("an ADMIN's error page keeps their real role and the manual setup form", async () => {
+  const d = deps();
+  const a = await signedUpUser(d, "a@example.com");
+  const b = await signedUpUser(d, "b@example.com");
+  const cookie = await adminOf(d, b.business);
+
+  const missing = await handleWhatsappSettingsPost({ headers: { cookie }, rawBody: form({ phoneNumberId: "222" }) }, d);
+  assert.equal(missing.status, 400);
+  assert.match(missing.html, /Phone number ID and access token are required/);
+  assert.doesNotMatch(missing.html, /Your role \(STAFF\)/);
+  assert.match(missing.html, MANUAL_FORM);
+
+  await handleWhatsappSettingsPost({ headers: { cookie: a.cookie }, rawBody: form({ phoneNumberId: "111", accessToken: "A" }) }, d);
+  const claimed = await handleWhatsappSettingsPost({ headers: { cookie }, rawBody: form({ phoneNumberId: "111", accessToken: "B" }) }, d);
+  assert.equal(claimed.status, 409);
+  assert.match(claimed.html, /already registered to another business/);
+  assert.match(claimed.html, /sign in to the MissedCall account that first connected it, or disconnect it there first/);
+  assert.doesNotMatch(claimed.html, /Your role \(STAFF\)/);
+  assert.match(claimed.html, MANUAL_FORM);
+  assert.ok(!claimed.html.includes(a.business.name), "nothing about the other business");
+  assert.ok(!claimed.html.includes("a@example.com"), "nothing about the other business");
+});
+
+test("a failure that is not a claim conflict shows a generic message, not 'already registered'", async () => {
+  const d = deps();
+  const { cookie } = await signedUpUser(d, "owner@example.com");
+  d.integrations = { ...d.integrations, register: async () => { throw new Error("disk full at /var/data"); } };
+
+  const res = await handleWhatsappSettingsPost({ headers: { cookie }, rawBody: form({ phoneNumberId: "123", accessToken: "T" }) }, d);
+
+  assert.equal(res.status, 400);
+  assert.match(res.html, /Could not save these WhatsApp details\. Please check them and try again\./);
+  assert.doesNotMatch(res.html, /already registered/);
+  assert.doesNotMatch(res.html, /disk full/, "the internal error stays in the log");
+  assert.match(res.html, MANUAL_FORM);
+});
+
+test("a failed save on an already-connected business still shows the error", async () => {
+  const d = deps();
+  const { business, cookie } = await signedUpUser(d, "owner@example.com");
+  await handleWhatsappSettingsPost({ headers: { cookie }, rawBody: form({ phoneNumberId: "123", accessToken: "T" }) }, d);
+  await d.integrations.markVerified(await d.integrations.forBusiness(business.id));
+
+  const res = await handleWhatsappSettingsPost({ headers: { cookie }, rawBody: form({ phoneNumberId: "123" }) }, d);
+
+  assert.equal(res.status, 400);
+  assert.match(res.html, /Phone number ID and access token are required/);
+  assert.match(res.html, /<details class="card advanced" id="advanced" open>/);
+});
+
 test("a business only ever sees its own integration", async () => {
   const d = deps();
   const a = await signedUpUser(d, "a@example.com");

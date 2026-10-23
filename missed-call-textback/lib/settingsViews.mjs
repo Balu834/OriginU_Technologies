@@ -423,8 +423,13 @@ export function whatsappSettingsPage({
        </form>`
     : "";
 
+  // A healthy connection hides the connect card, and with it the error
+  // block. A failed manual save would then report nothing, so the error
+  // moves in here beside the form that produced it, opened.
+  const advancedError = connected && !tokenIsExpired ? errorBlock(error) : "";
+
   const advanced = `
-    <details class="card advanced" id="advanced"${failure ? " open" : ""}>
+    <details class="card advanced" id="advanced"${failure || advancedError ? " open" : ""}>
       <summary>Need to connect manually? Advanced / Manual Setup</summary>
       <div class="advanced-body">
         <p class="warn">
@@ -432,6 +437,7 @@ export function whatsappSettingsPage({
           should use Connect WhatsApp.
         </p>
         ${technical}
+        ${advancedError}
         ${manualForm}
       </div>
     </details>`;

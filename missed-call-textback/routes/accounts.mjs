@@ -9,7 +9,7 @@
 import { currentSession, createSession, sessionCookie, loginRateLimited, COOKIE_NAME, parseCookies } from "../lib/auth.mjs";
 import { resolveActor, can, isValidRole, isValidEmail, isAcceptablePassword, normaliseEmail } from "../lib/users.mjs";
 import { businessRecord, onboardingStatus } from "../lib/businesses.mjs";
-import { publicView, integrationState } from "../lib/integrations.mjs";
+import { publicView, integrationState, PHONE_NUMBER_CLAIMED } from "../lib/integrations.mjs";
 import { VERIFIED_MESSAGE, FAILURE_MESSAGES } from "../lib/metaVerify.mjs";
 import { embeddedSignupConfig, signupMessage } from "../lib/embeddedSignup.mjs";
 import {
@@ -126,7 +126,18 @@ export async function handleOnboardingPost(ctx, deps) {
 export async function handleWhatsappSettingsGet(ctx, deps) {
   const actor = await actorFor(ctx, deps);
   if (!actor) return redirect(SIGN_IN);
+  return { status: 200, html: await whatsappSettingsHtml(ctx, deps, actor) };
+}
 
+/**
+ * The WhatsApp settings page for `actor`, exactly as GET renders it.
+ *
+ * The POST error responses render through here too. They used to build
+ * the page from `{ error }` alone, which dropped the actor's role, so an
+ * ADMIN whose save failed was told they were STAFF and lost the very
+ * form they needed to correct the mistake.
+ */
+async function whatsappSettingsHtml(ctx, deps, actor, { error } = {}) {
   const business = deps.businesses?.byId(actor.businessId) ?? null;
   const integration = await deps.integrations.forBusiness(actor.businessId);
 
@@ -134,30 +145,28 @@ export async function handleWhatsappSettingsGet(ctx, deps) {
   // business record, and it is certainly not read back out of the markup.
   const connection = integrationState(integration);
 
-  return {
-    status: 200,
-    html: whatsappSettingsPage({
-      business,
-      // Safe metadata only — publicView never carries a credential, not
-      // even the ciphertext.
-      integration: publicView(integration),
-      status: connection,
-      onboarding: onboardingStatus(business ?? {}, { connection }),
-      verification: verificationNotice(ctx.query?.get("v")),
-      templates: templatesNotice(ctx.query?.get("t")),
-      testMessage: testMessageNotice(ctx.query?.get("m")),
-      // A Meta flow that didn't finish, as one of OUR sentences. The
-      // marker is looked up in a fixed table, so a crafted ?e= can only
-      // produce a message this codebase already contains.
-      failure: ctx.query?.get("e") ? signupMessage(ctx.query.get("e")) : null,
-      // The two public identifiers the browser needs to open Meta's flow,
-      // plus whether it can be opened at all. No secret is in here.
-      signup: embeddedSignupConfig(deps.config ?? {}),
-      canManage: can(actor.role, "manageSettings"),
-      role: actor.role,
-      actor,
-    }),
-  };
+  return whatsappSettingsPage({
+    business,
+    // Safe metadata only — publicView never carries a credential, not
+    // even the ciphertext.
+    integration: publicView(integration),
+    status: connection,
+    onboarding: onboardingStatus(business ?? {}, { connection }),
+    verification: verificationNotice(ctx.query?.get("v")),
+    templates: templatesNotice(ctx.query?.get("t")),
+    testMessage: testMessageNotice(ctx.query?.get("m")),
+    // A Meta flow that didn't finish, as one of OUR sentences. The
+    // marker is looked up in a fixed table, so a crafted ?e= can only
+    // produce a message this codebase already contains.
+    failure: ctx.query?.get("e") ? signupMessage(ctx.query.get("e")) : null,
+    // The two public identifiers the browser needs to open Meta's flow,
+    // plus whether it can be opened at all. No secret is in here.
+    signup: embeddedSignupConfig(deps.config ?? {}),
+    canManage: can(actor.role, "manageSettings"),
+    role: actor.role,
+    actor,
+    error,
+  });
 }
 
 /**
@@ -199,7 +208,10 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
 
   if (!can(actor.role, "manageSettings")) {
     log("settings_change_denied", { role: actor.role });
-    return { status: 403, html: whatsappSettingsPage({ error: "Your role cannot change integration settings." }) };
+    return {
+      status: 403,
+      html: await whatsappSettingsHtml(ctx, deps, actor, { error: "Your role cannot change integration settings." }),
+    };
   }
 
   const form = formOf(ctx);
@@ -207,7 +219,10 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
   const accessToken = (form.get("accessToken") ?? "").trim();
 
   if (!phoneNumberId || !accessToken) {
-    return { status: 400, html: whatsappSettingsPage({ error: "Phone number ID and access token are required." }) };
+    return {
+      status: 400,
+      html: await whatsappSettingsHtml(ctx, deps, actor, { error: "Phone number ID and access token are required." }),
+    };
   }
 
   const wabaId = (form.get("wabaId") ?? "").trim();
@@ -230,9 +245,18 @@ export async function handleWhatsappSettingsPost(ctx, deps) {
     log("integration_registered", { businessId: actor.businessId });
   } catch (err) {
     logError("integration_register_failed", err, { businessId: actor.businessId });
+    // Only a genuine claim conflict is reported as one. Anything else gets
+    // a generic sentence (the real error is in the log above), and neither
+    // says anything about which business holds the number.
+    const claimed = err?.code === PHONE_NUMBER_CLAIMED;
     return {
-      status: 409,
-      html: whatsappSettingsPage({ error: "That WhatsApp number is already registered to another business." }),
+      status: claimed ? 409 : 400,
+      html: await whatsappSettingsHtml(ctx, deps, actor, {
+        error: claimed
+          ? "That WhatsApp number is already registered to another business. If this is your number, " +
+            "sign in to the MissedCall account that first connected it, or disconnect it there first."
+          : "Could not save these WhatsApp details. Please check them and try again.",
+      }),
     };
   }
 
