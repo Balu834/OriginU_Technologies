@@ -186,7 +186,7 @@ test("the owner WhatsApp number is validated, not silently accepted", async () =
   const w = await buildWorld();
   const session = await sessionFor(w, w.ownerA);
 
-  for (const bad of ["", "   ", "not a phone", "9888888888", "+91 98888 88888", "+0123456789", "12345", "<script>"]) {
+  for (const bad of ["", "   ", "not a phone", "+0123456789", "12345", "<script>"]) {
     const res = await handleBusinessSettingsPost(postCtx(session, { ...VALID, ownerWhatsApp: bad }), w);
     assert.equal(res.status, 400, `"${bad}" was accepted`);
     await reload(w);
@@ -198,6 +198,20 @@ test("the owner WhatsApp number is validated, not silently accepted", async () =
   assert.equal(ok.status, 302);
   await reload(w);
   assert.equal(w.businesses.byId("bs-a").ownerWhatsApp, "+919777777777");
+});
+
+test("an owner number typed without a country code is saved as E.164", async () => {
+  const w = await buildWorld();
+  const session = await sessionFor(w, w.ownerA);
+
+  // Lead alerts and the own-number filter both need the "+91…" form; a
+  // bare national number used to be stored as typed and silently break them.
+  for (const [typed, stored] of [["9985324880", "+919985324880"], ["09985324880", "+919985324880"], ["+91 99853 24880", "+919985324880"]]) {
+    const res = await handleBusinessSettingsPost(postCtx(session, { ...VALID, ownerWhatsApp: typed }), w);
+    assert.equal(res.status, 302, `"${typed}" was rejected`);
+    await reload(w);
+    assert.equal(w.businesses.byId("bs-a").ownerWhatsApp, stored, `"${typed}" was not normalised`);
+  }
 });
 
 test("a missing business name is rejected", async () => {

@@ -124,6 +124,21 @@ test("a client cannot nominate its own role at onboarding", async () => {
   assert.notEqual(memberships[0].businessId, "hijack", "nor does the business id");
 });
 
+test("an owner number typed without a country code is saved as E.164 at onboarding", async () => {
+  const d = deps();
+  const user = await d.accounts.signUp({ email: "e164@example.com", password: PW });
+  const sid = await createSession(d.store, null, { userId: user.id });
+
+  await handleOnboardingPost(
+    { headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form({ name: "Acme", ownerWhatsApp: "9985324880" }) },
+    d
+  );
+
+  const [membership] = await d.accounts.membershipsOf(user.id);
+  const saved = await d.store.getBusiness(membership.businessId);
+  assert.equal(saved.ownerWhatsApp, "+919985324880");
+});
+
 test("role permissions are what they claim", () => {
   assert.equal(can("OWNER", "manageTeam"), true);
   assert.equal(can("ADMIN", "manageTeam"), false);
