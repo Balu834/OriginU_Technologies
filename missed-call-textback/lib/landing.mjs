@@ -307,6 +307,9 @@ const faq = (q, a) => `
 export function landingPage({ businessName = "", plans = null } = {}) {
   const free = plans?.FREE ?? { price: "Free", leads: 25, messages: 250 };
   const pro = plans?.PRO ?? { price: "₹299 / month", leads: 500, messages: 5000 };
+  // The card is already headed "Free"; repeating it as the amount reads like a typo.
+  const freeAmount = /^free$/i.test(String(free.price).trim()) ? "₹0" : free.price;
+  const count = (n) => Number(n).toLocaleString("en-IN");
 
   const navLinks = [
     ["#how", "How It Works"],
@@ -509,14 +512,14 @@ export function landingPage({ businessName = "", plans = null } = {}) {
       <div class="price-grid">
         <div class="plan">
           <h3>Free</h3>
-          <div class="amount">${escapeHtml(free.price)}</div>
+          <div class="amount">${escapeHtml(freeAmount)}</div>
           <div class="per">No card needed</div>
           <ul>
             <li>${tick} Missed-call follow-up</li>
             <li>${tick} WhatsApp automation</li>
             <li>${tick} Lead collection</li>
             <li>${tick} Lead dashboard</li>
-            <li>${tick} Up to ${escapeHtml(String(free.leads))} leads a month</li>
+            <li>${tick} Up to ${escapeHtml(count(free.leads))} leads a month</li>
           </ul>
           <a class="btn btn-ghost" href="${SIGNUP_URL}">Get Started Free</a>
         </div>
@@ -526,8 +529,8 @@ export function landingPage({ businessName = "", plans = null } = {}) {
           <div class="per">Billed monthly</div>
           <ul>
             <li>${tick} Everything in Free</li>
-            <li>${tick} Up to ${escapeHtml(String(pro.leads))} leads a month</li>
-            <li>${tick} Up to ${escapeHtml(String(pro.messages))} WhatsApp messages a month</li>
+            <li>${tick} Up to ${escapeHtml(count(pro.leads))} leads a month</li>
+            <li>${tick} Up to ${escapeHtml(count(pro.messages))} WhatsApp messages a month</li>
             <li>${tick} Owner notifications</li>
             <li>${tick} Business settings</li>
             <li>${tick} Team members</li>

@@ -126,7 +126,7 @@ const errorBlock = (error) => (error ? `<p class="error">${escapeHtml(error)}</p
 
 export function signupPage({ error, email = "" } = {}) {
   return page("Create account", `
-    <div class="plate">Missed-call textback</div>
+    <div class="plate">MissedCall</div>
     <h1>Create your account</h1>
     <p class="sub">One account, then you'll set up your business.</p>
     <form class="card" method="POST" action="/signup" style="margin-top:22px">
@@ -929,7 +929,7 @@ function checkoutScript({ businessName = "", prefill = {} } = {}) {
           var rzp = new window.Razorpay({
             key: res.body.keyId,
             subscription_id: res.body.subscriptionId,
-            name: BUSINESS || "Missed-call textback",
+            name: BUSINESS || "MissedCall",
             description: res.body.plan + " \\u2014 " + res.body.displayPrice,
             prefill: PREFILL,
             handler: function () {
