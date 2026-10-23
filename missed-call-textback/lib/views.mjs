@@ -135,7 +135,9 @@ const STYLES = `
   input[type=password] { width:100%; padding:13px 14px; font-size:16px; font-family:var(--mono);
                          letter-spacing:.12em; border:1px solid var(--line); border-radius:3px;
                          background:var(--bg); color:var(--ink); }
-  input[type=password]:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+  input[type=email] { width:100%; padding:13px 14px; font-size:16px; font-family:inherit;
+                      border:1px solid var(--line); border-radius:3px; background:var(--bg); color:var(--ink); }
+  input[type=password]:focus, input[type=email]:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
   .gate button { width:100%; margin-top:14px; min-height:48px; font-size:15px; font-weight:600;
                  border:0; border-radius:3px; background:var(--accent); color:var(--accent-ink);
                  cursor:pointer; letter-spacing:.02em; }
