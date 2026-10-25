@@ -114,7 +114,7 @@ test("a client cannot nominate its own role at onboarding", async () => {
   const sid = await createSession(d.store, null, { userId: user.id });
 
   await handleOnboardingPost(
-    { headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form({ name: "Acme", role: "STAFF", businessId: "hijack" }) },
+    { headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form({ name: "Acme", ownerName: "Ravi", ownerWhatsApp: "+919876543210", role: "STAFF", businessId: "hijack" }) },
     d
   );
 
@@ -130,7 +130,7 @@ test("an owner number typed without a country code is saved as E.164 at onboardi
   const sid = await createSession(d.store, null, { userId: user.id });
 
   await handleOnboardingPost(
-    { headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form({ name: "Acme", ownerWhatsApp: "9985324880" }) },
+    { headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form({ name: "Acme", ownerName: "Ravi", ownerWhatsApp: "9985324880" }) },
     d
   );
 
@@ -427,4 +427,27 @@ test("an empty session resolves to no actor at all", async () => {
   const d = deps();
   assert.equal(await resolveActor(null, d.accounts), null);
   assert.equal(await resolveActor({}, d.accounts), null);
+});
+
+test("onboarding requires an owner name and a readable lead-alert number", async () => {
+  const d = deps();
+  const user = await d.accounts.signUp({ email: "req@example.com", password: PW });
+  const sid = await createSession(d.store, null, { userId: user.id });
+  const post = (fields) => handleOnboardingPost({ headers: { cookie: `${COOKIE_NAME}=${sid}` }, rawBody: form(fields) }, d);
+
+  // A blank owner name would make Meta reject every missed-call template.
+  const noOwner = await post({ name: "Acme", ownerWhatsApp: "+919876543210" });
+  assert.equal(noOwner.status, 400);
+  assert.match(noOwner.html, /Owner name is required/);
+  assert.match(noOwner.html, /value="Acme"/, "what was typed is kept");
+
+  const noNumber = await post({ name: "Acme", ownerName: "Ravi" });
+  assert.equal(noNumber.status, 400);
+  assert.match(noNumber.html, /lead alerts should go/);
+
+  const badNumber = await post({ name: "Acme", ownerName: "Ravi", ownerWhatsApp: "12" });
+  assert.equal(badNumber.status, 400);
+  assert.match(badNumber.html, /doesn(?:'|&#39;)t look right/);
+
+  assert.equal((await d.accounts.membershipsOf(user.id)).length, 0, "no business was created");
 });

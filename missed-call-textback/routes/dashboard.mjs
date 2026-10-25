@@ -1,6 +1,7 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
 import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
 import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
+import { sendOwnerAlert } from "../lib/ownerAlert.mjs";
 import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
@@ -270,7 +271,15 @@ export async function handleRetryNotification(ctx, deps) {
     return { status: 302, headers: { Location: `/lead?id=${encodeURIComponent(id)}` }, body: {} };
   }
 
-  const result = await client.sendText(destination, formatOwnerNotification(lead));
+  // Same path as the original alert: the lead-alert template (no 24-hour
+  // window), falling back to text if Meta has not approved it yet.
+  const { result, via } = await sendOwnerAlert(client, {
+    to: destination,
+    lead,
+    businessName: business?.name || config.BUSINESS_NAME,
+    language: config.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+    text: formatOwnerNotification(lead),
+  });
   const ownerNotified = result?.ok !== false;
 
   if (tenantStore.saveMessage) {
@@ -283,7 +292,7 @@ export async function handleRetryNotification(ctx, deps) {
         customerPhone: lead.callerNumber,
         messageId: providerMessageId(result),
         text: formatOwnerNotification(lead),
-        metadata: { accepted: ownerNotified, retry: true, to: destination },
+        metadata: { accepted: ownerNotified, retry: true, to: destination, via },
       })
     );
   }

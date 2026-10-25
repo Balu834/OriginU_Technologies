@@ -97,7 +97,22 @@ export async function handleOnboardingPost(ctx, deps) {
 
   const form = formOf(ctx);
   const name = (form.get("name") ?? "").trim();
-  if (!name) return { status: 400, html: onboardingPage({ error: "Business name is required." }) };
+  const ownerName = (form.get("ownerName") ?? "").trim();
+  const ownerWhatsAppRaw = (form.get("ownerWhatsApp") ?? "").trim();
+  // The template's {{owner_name}} cannot be empty (Meta rejects it, so no
+  // missed-call message would ever send), and the alert number is where
+  // every lead goes, so both are required here rather than discovered on
+  // the first real missed call.
+  const ownerWhatsApp = toE164(ownerWhatsAppRaw);
+  const values = Object.fromEntries(
+    ["name", "industry", "businessPhone", "ownerName", "ownerWhatsApp", "areas", "services", "timezone"]
+      .map((k) => [k, (form.get(k) ?? "").trim()])
+  );
+  const fail = (error) => ({ status: 400, html: onboardingPage({ error, values }) });
+  if (!name) return fail("Business name is required.");
+  if (!ownerName) return fail("Owner name is required. Customers are told this person will call them back.");
+  if (!ownerWhatsAppRaw) return fail("Enter the WhatsApp number where lead alerts should go.");
+  if (!ownerWhatsApp) return fail("That WhatsApp number doesn't look right. Use the full number, e.g. +919876543210.");
 
   const business = businessRecord({
     // Server-generated: a client cannot choose a business id and so cannot
@@ -107,10 +122,9 @@ export async function handleOnboardingPost(ctx, deps) {
     industry: (form.get("industry") ?? "").trim(),
     businessPhone: (form.get("businessPhone") ?? "").trim(),
     timezone: (form.get("timezone") ?? "Asia/Kolkata").trim(),
-    ownerName: (form.get("ownerName") ?? "").trim(),
-    // E.164 where it can be read ("9985324880" -> "+919985324880"), so lead
-    // alerts reach the owner; otherwise kept as typed, as before.
-    ownerWhatsApp: toE164(form.get("ownerWhatsApp")) ?? (form.get("ownerWhatsApp") ?? "").trim(),
+    ownerName,
+    // E.164 ("9985324880" -> "+919985324880"), validated above.
+    ownerWhatsApp,
     areas: (form.get("areas") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     services: (form.get("services") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   });

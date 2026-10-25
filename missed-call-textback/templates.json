@@ -17,6 +17,14 @@
     "_why": "Same message, honest about timing. Promising an immediate callback at 11pm and not delivering is worse than saying 'first thing'."
   },
 
+  "new_lead_alert": {
+    "category": "UTILITY",
+    "language": "en",
+    "body": "New lead for {{business_name}}: {{customer_name}}, {{customer_phone}}. Needs: {{lead_need}}. Area: {{lead_area}}. Please call them back soon.",
+    "example": { "business_name": "City Electricals", "customer_name": "Ravi", "customer_phone": "+919876543210", "lead_need": "AC not cooling (today)", "lead_area": "Kukatpally" },
+    "_why": "Sent to the OWNER, not the customer. Plain text only reaches someone who messaged the business number in the last 24 hours, which a new owner never has. Created automatically on connect (lib/embeddedSignup.mjs); alerts fall back to text until Meta approves it (lib/ownerAlert.mjs)."
+  },
+
   "_conversation": {
     "_note": "Free-form replies sent once the customer has messaged us and a 24-hour service window is open. {{1}}/{{2}} are filled in by lib/conversation.mjs, not by Meta.",
 
@@ -28,5 +36,18 @@
     "lead_confirmation": "Thanks {{1}}! Got it — {{2}} will be in touch shortly.",
 
     "emergency_safety": "Thanks — that sounds urgent, {{1}} is being alerted now. If you can smell burning or see sparking, switch off at the mains if it's safe to reach, and don't touch anything else."
+  },
+
+  "_conversation_events": {
+    "_note": "Used instead of _conversation for wedding, events, makeup, photography, catering and decor businesses (lib/verticals.mjs). Asks for the occasion and the event date; no safety message.",
+
+    "ask_problem": "Thanks for getting in touch! What's the occasion, and what do you need?",
+    "ask_date": "Lovely. What's the date of the event?",
+    "ask_area": "And where is it? The area or venue is fine.",
+    "ask_name": "Thanks. May I have your name?",
+
+    "lead_confirmation": "Thanks {{1}}! Got it, {{2}} will call you shortly to talk it through.",
+
+    "emergency_safety": ""
   }
 }

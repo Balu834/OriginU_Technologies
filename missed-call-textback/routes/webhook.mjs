@@ -4,6 +4,7 @@ import { businessContext } from "../lib/businesses.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
+import { toE164 } from "../lib/phone.mjs";
 
 /** GET /webhook — Meta's one-time verification handshake. */
 export function verifyWebhookGet(ctx, { config }) {
@@ -138,6 +139,18 @@ export function handleWebhookPost(ctx, deps) {
               metadata: { ...stored.metadata, statusAt: new Date().toISOString() },
             });
             log("delivery_status_recorded", { status: status.status });
+
+            // The API accepting a lead alert is not the owner receiving it.
+            // When Meta later reports it failed, the lead goes back to
+            // "owner not notified" so the dashboard flags it for a retry,
+            // instead of claiming a delivery that never happened.
+            if (status.status === "failed" && stored.senderType === "owner" && stored.leadId && tenantStore.getLead) {
+              const lead = await tenantStore.getLead(stored.leadId);
+              if (lead && lead.ownerNotified !== false) {
+                await tenantStore.saveLead({ ...lead, ownerNotified: false, updatedAt: new Date().toISOString() });
+                log("owner_notification_failed_late", { leadId: lead.id });
+              }
+            }
           } catch (err) {
             logError("delivery_status_error", err, {});
           }
@@ -161,6 +174,16 @@ export function handleWebhookPost(ctx, deps) {
             }
 
             const from = msg.from.startsWith("+") ? msg.from : `+${msg.from}`;
+
+            // The owner messaging their own business number (to keep alerts
+            // flowing, or to test) is not a customer, and must not be asked
+            // "what do you need?" or turned into a lead about themselves.
+            // Compared in E.164 so a legacy unprefixed owner number still matches.
+            if (business?.ownerWhatsApp && from === (toE164(business.ownerWhatsApp) ?? business.ownerWhatsApp)) {
+              log("owner_message_ignored", { businessId: business.id });
+              continue;
+            }
+
             log("customer_reply_received", { from, businessId: business?.id });
 
             const result = await handleInboundMessage(

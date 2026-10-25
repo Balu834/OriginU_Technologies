@@ -27,6 +27,7 @@
  * integration service, which encrypts it before it is stored.
  */
 import { log, logError } from "./logger.mjs";
+import { OWNER_ALERT_TEMPLATE } from "./ownerAlert.mjs";
 
 /**
  * The Graph version this flow speaks.
@@ -123,6 +124,21 @@ export const TEMPLATE_DEFINITIONS = {
     body:
       "Sorry we missed your call — this is {{business_name}}. We're closed right now but reply with what you need and your area, and {{owner_name}} will call you first thing.",
     example: { business_name: "City Electricals", owner_name: "Ravi" },
+  },
+  // The lead alert to the OWNER. Plain text only reaches the owner within
+  // 24 hours of the owner messaging the business number, which a new owner
+  // never has, so the alert goes out as this template (see lib/ownerAlert.mjs).
+  [OWNER_ALERT_TEMPLATE]: {
+    category: "UTILITY",
+    body:
+      "New lead for {{business_name}}: {{customer_name}}, {{customer_phone}}. Needs: {{lead_need}}. Area: {{lead_area}}. Please call them back soon.",
+    example: {
+      business_name: "City Electricals",
+      customer_name: "Ravi",
+      customer_phone: "+919876543210",
+      lead_need: "AC not cooling (today)",
+      lead_area: "Kukatpally",
+    },
   },
 };
 

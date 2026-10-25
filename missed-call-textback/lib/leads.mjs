@@ -77,6 +77,9 @@ export function createLead({ callerNumber, fields, emergency }) {
     area: fields.area ?? "",
     problem: fields.problem ?? "",
     urgency: fields.urgency ?? "",
+    // The event date as the customer wrote it ("14th Feb", "next month").
+    // Only events businesses ask for it; empty for everyone else.
+    eventDate: fields.date ?? "",
     summary: buildSummary(fields),
     status: "new",
     priority: emergency ? "URGENT" : "NORMAL",
@@ -90,7 +93,11 @@ export function createLead({ callerNumber, fields, emergency }) {
 }
 
 /** Two lines, max. Only states what was actually collected — never invents details. */
-export function buildSummary({ problem, area, urgency }) {
+export function buildSummary({ problem, area, urgency, date }) {
+  // An events lead is about a day, not a technician visit.
+  if (date) {
+    return `${capitalize(problem) || "Booking enquiry"} on ${date}${area ? ` in ${area}` : ""}.`;
+  }
   const problemPart = capitalize(problem) || "Service request";
   const areaPart = area ? ` in ${area}` : "";
   const urgencyPart =
@@ -114,8 +121,9 @@ export function formatOwnerNotification(lead) {
     `Name: ${lead.name || "Not given"}`,
     `Phone: ${number || "Not given"}`,
     `Area: ${lead.area || "Not given"}`,
-    `Problem: ${lead.problem || "Not given"}`,
-    `Urgency: ${urgencyDisplay}`,
+    ...(lead.eventDate
+      ? [`Need: ${lead.problem || "Not given"}`, `Date: ${lead.eventDate}`]
+      : [`Problem: ${lead.problem || "Not given"}`, `Urgency: ${urgencyDisplay}`]),
     "",
     "Summary:",
     lead.summary,
