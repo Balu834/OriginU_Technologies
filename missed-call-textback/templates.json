@@ -20,7 +20,7 @@
   "new_lead_alert": {
     "category": "UTILITY",
     "language": "en",
-    "body": "New lead for {{business_name}}: {{customer_name}}, {{customer_phone}}. Needs: {{lead_need}}. Area: {{lead_area}}. Please call them back soon.",
+    "body": "You have a new lead from a missed call to {{business_name}}. The customer's name is {{customer_name}} and their number is {{customer_phone}}. They told us they need {{lead_need}}, and their area is {{lead_area}}. Please call them back as soon as you can, while they are still waiting to hear from you.",
     "example": { "business_name": "City Electricals", "customer_name": "Ravi", "customer_phone": "+919876543210", "lead_need": "AC not cooling (today)", "lead_area": "Kukatpally" },
     "_why": "Sent to the OWNER, not the customer. Plain text only reaches someone who messaged the business number in the last 24 hours, which a new owner never has. Created automatically on connect (lib/embeddedSignup.mjs); alerts fall back to text until Meta approves it (lib/ownerAlert.mjs)."
   },
