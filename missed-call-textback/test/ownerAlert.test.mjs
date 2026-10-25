@@ -35,6 +35,15 @@ test("the lead-alert template is one Meta will accept", () => {
   assert.doesNotMatch(def.body, /^\{\{|\}\}$/, "a template may not start or end with a variable");
   const vars = [...def.body.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
   assert.deepEqual(vars, Object.keys(def.example).sort(), "every variable has an example");
+
+  // Meta rejects a template with too many variables for its length (subcode
+  // 2388293); the first, short wording was refused in production for this.
+  const fixedWords = def.body.replace(/\{\{\w+\}\}/g, " ").split(/\s+/).filter(Boolean).length;
+  assert.ok(fixedWords / vars.length >= 8, `only ${fixedWords} fixed words for ${vars.length} variables`);
+});
+
+test("the template reference file says the same as the template Outly creates", () => {
+  assert.equal(templates[OWNER_ALERT_TEMPLATE].body, TEMPLATE_DEFINITIONS[OWNER_ALERT_TEMPLATE].body);
 });
 
 test("an approved alert template is used, with clean non-empty values", async () => {

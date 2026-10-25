@@ -130,8 +130,11 @@ export const TEMPLATE_DEFINITIONS = {
   // never has, so the alert goes out as this template (see lib/ownerAlert.mjs).
   [OWNER_ALERT_TEMPLATE]: {
     category: "UTILITY",
+    // Meta refuses a template with too many variables for its length
+    // (subcode 2388293, "Invalid parameter"), which the first, shorter
+    // wording hit, so each value sits inside a full sentence.
     body:
-      "New lead for {{business_name}}: {{customer_name}}, {{customer_phone}}. Needs: {{lead_need}}. Area: {{lead_area}}. Please call them back soon.",
+      "You have a new lead from a missed call to {{business_name}}. The customer's name is {{customer_name}} and their number is {{customer_phone}}. They told us they need {{lead_need}}, and their area is {{lead_area}}. Please call them back as soon as you can, while they are still waiting to hear from you.",
     example: {
       business_name: "City Electricals",
       customer_name: "Ravi",
