@@ -865,18 +865,21 @@ test("Create message templates asks Meta for the ones the WABA lacks and reports
   const res = await createTemplates(w, session);
 
   assert.equal(res.status, 302);
-  assert.equal(res.headers.Location, "/settings/whatsapp?t=1.1.0", "one created, one already there, none failed");
+  assert.equal(
+    res.headers.Location, "/settings/whatsapp?t=1.2.0",
+    "after-hours created; missed-call and the owner alert (asked for on connect) already there"
+  );
   const posts = templatePosts(w).slice(before);
-  assert.deepEqual(posts.map((c) => c.body.name).sort(), ["missed_call_after_hours", "missed_call_immediate"]);
+  assert.deepEqual(posts.map((c) => c.body.name).sort(), ["missed_call_after_hours", "missed_call_immediate", "new_lead_alert"]);
   for (const c of posts) {
     assert.ok(c.url.includes(`/${WABA_A}/message_templates`), "created in the business's own WABA");
     assert.equal(c.token, TOKEN_A, "with the business's own token");
     assert.equal(c.body.category, "UTILITY");
   }
 
-  const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t: "1.1.0" } }), w)).html;
+  const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t: "1.2.0" } }), w)).html;
   assert.match(page, /1 message template created and sent to Meta for approval\./);
-  assert.match(page, /1 message template already in your WhatsApp account\./);
+  assert.match(page, /2 message templates already in your WhatsApp account\./);
   assert.match(page, /action="\/settings\/whatsapp\/templates"/, "the connected page offers the button");
 });
 
@@ -885,8 +888,9 @@ test("a second press creates nothing new, and a failure is said plainly", async 
   const session = await sessionFor(w, w.userA);
   await connect(w, session, GOOD_A);
 
-  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=1.1.0");
-  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=0.2.0");
+  // Connecting already asked for the missed-call and owner-alert templates.
+  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=1.2.0");
+  assert.equal((await createTemplates(w, session)).headers.Location, "/settings/whatsapp?t=0.3.0");
 
   const page = (await handleWhatsappSettingsGet(pageCtx({ session, query: { t: "0.0.2" } }), w)).html;
   assert.match(page, /2 message templates could not be created/);

@@ -141,37 +141,47 @@ export function signupPage({ error, email = "" } = {}) {
     <p class="sub">Already have one? <a href="/leads">Sign in</a>.</p>`, "", { bare: true });
 }
 
-export function onboardingPage({ error } = {}) {
+export function onboardingPage({ error, values = {} } = {}) {
+  // Values typed before a validation error are put back, so a missing owner
+  // name doesn't cost the owner every other field.
+  const v = (k, fallback = "") => escapeHtml(values[k] ?? fallback);
   return page("Set up your business", `
     <div class="plate">Step 1 of 2</div>
     <h1>Your business</h1>
     <p class="sub">This is what customers see and how leads reach you.</p>
     <form class="card" method="POST" action="/onboarding" style="margin-top:22px">
       <label for="name">Business name</label>
-      <input id="name" name="name" required placeholder="Planet Electrical">
+      <input id="name" name="name" required placeholder="Planet Electrical" value="${v("name")}">
 
       <label for="industry">Industry</label>
-      <input id="industry" name="industry" placeholder="Electrical">
+      <input id="industry" name="industry" list="industry-options" placeholder="Electrical" value="${v("industry")}">
+      <datalist id="industry-options">
+        <option value="Electrical"><option value="Plumbing"><option value="AC repair">
+        <option value="Wedding and events"><option value="Makeup artist"><option value="Photography">
+        <option value="Catering"><option value="Decor">
+      </datalist>
+      <p class="hint">Sets the questions customers are asked. Wedding, events, makeup, photography, catering and decor businesses are asked for the occasion and date.</p>
 
       <label for="businessPhone">Business phone</label>
-      <input id="businessPhone" name="businessPhone" placeholder="+91…">
+      <input id="businessPhone" name="businessPhone" placeholder="+91…" value="${v("businessPhone")}">
 
       <label for="ownerName">Owner name</label>
-      <input id="ownerName" name="ownerName" placeholder="Mohamed">
+      <input id="ownerName" name="ownerName" required placeholder="Mohamed" value="${v("ownerName")}">
+      <p class="hint">Customers are told this person will call them back.</p>
 
       <label for="ownerWhatsApp">Where should leads be sent?</label>
-      <input id="ownerWhatsApp" name="ownerWhatsApp" placeholder="+91… (WhatsApp)">
-      <p class="hint">New leads arrive here as a WhatsApp message.</p>
+      <input id="ownerWhatsApp" name="ownerWhatsApp" required inputmode="tel" placeholder="+91… (WhatsApp)" value="${v("ownerWhatsApp")}">
+      <p class="hint">New leads arrive here as a WhatsApp message. Use a different number from the one customers call.</p>
 
       <label for="areas">Areas served</label>
-      <input id="areas" name="areas" placeholder="Kukatpally, Madhapur">
+      <input id="areas" name="areas" placeholder="Kukatpally, Madhapur" value="${v("areas")}">
       <p class="hint">Comma separated.</p>
 
       <label for="services">Services</label>
-      <input id="services" name="services" placeholder="AC repair, Wiring">
+      <input id="services" name="services" placeholder="AC repair, Wiring" value="${v("services")}">
 
       <label for="timezone">Timezone</label>
-      <input id="timezone" name="timezone" value="Asia/Kolkata">
+      <input id="timezone" name="timezone" value="${v("timezone", "Asia/Kolkata")}">
 
       <button class="full" type="submit">Create business</button>
       ${errorBlock(error)}

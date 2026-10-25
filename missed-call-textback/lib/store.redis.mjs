@@ -18,7 +18,12 @@
  *   has no native "list all keys matching a pattern" that's safe/cheap at
  *   scale.
  */
-const MISSED_CALL_TTL_SECONDS = 10 * 60; // matches routes/missedCall.mjs's dedupe window
+// Kept well beyond routes/missedCall.mjs's 10-minute dedupe window, which
+// compares the timestamp itself. The conversation also reads it to tell a
+// reply to a NEW missed call from one to an old, abandoned run; expiring it
+// after 10 minutes made any later reply continue the stale run ("AC not
+// cooling" saved as the customer's name).
+const MISSED_CALL_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PROCESSED_MESSAGE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days is far beyond any realistic Meta retry window
 const USAGE_TTL_SECONDS = 400 * 24 * 60 * 60; // comfortably longer than any billing period we report on
 

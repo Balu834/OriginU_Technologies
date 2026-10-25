@@ -108,6 +108,12 @@ export function applyBusinessProfile(existing, input = {}, { isValidPhone, norma
     errors.ownerWhatsApp = "Enter the number in international format, e.g. +919876543210.";
   }
 
+  // The owner's name fills {{owner_name}} in the missed-call template, and
+  // Meta rejects a template sent with an empty parameter, so a business
+  // without one cannot send a single missed-call message.
+  const ownerName = text(input.ownerName) || existing?.ownerName || "";
+  if (!ownerName) errors.ownerName = "Owner name is required. Customers are told this person will call back.";
+
   const timezone = text(input.timezone) || existing?.timezone || "Asia/Kolkata";
   if (timezone.length > 64) errors.timezone = "That timezone does not look right.";
 
@@ -118,7 +124,7 @@ export function applyBusinessProfile(existing, input = {}, { isValidPhone, norma
     ...existing,
     // Only these may move.
     name,
-    ownerName: text(input.ownerName) || existing?.ownerName || "",
+    ownerName,
     ownerWhatsApp,
     industry: text(input.industry),
     businessPhone: text(input.businessPhone),

@@ -34,6 +34,7 @@ import { embeddedSignupConfig, SIGNUP_FAILURES, signupMessage, TEMPLATE_DEFINITI
 import { expiryFromSeconds } from "../lib/integrations.mjs";
 import { reportMissedCall } from "./missedCall.mjs";
 import { log, logError } from "../lib/logger.mjs";
+import { OWNER_ALERT_TEMPLATE } from "../lib/ownerAlert.mjs";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
 
@@ -224,6 +225,15 @@ export async function handleWhatsappConnect(ctx, deps) {
         state: template.ok ? (template.existing ? "existing" : "submitted") : "failed",
       });
     }
+    // The owner's lead alert needs its own template: plain text never
+    // reaches an owner who hasn't messaged the business number in the last
+    // 24 hours. Best-effort like the one above; until Meta approves it,
+    // alerts fall back to text (lib/ownerAlert.mjs).
+    const alert = await deps.embeddedSignup.ensureTemplate(wabaId, accessToken, {
+      name: OWNER_ALERT_TEMPLATE,
+      language: deps.config?.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+    });
+    if (!alert.ok && !alert.skipped) log("owner_alert_template_failed", { businessId: actor.businessId });
   }
 
   const result = await verifyStored(deps, integration, {

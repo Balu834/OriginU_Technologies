@@ -27,8 +27,17 @@ export const TEST_CONFIG = {
  * body.messages[0].id — transcript and delivery-status code reads that,
  * and a double returning an empty body would hide those paths.
  */
-export function createFakeWa() {
+/**
+ * A WhatsApp client that records what it sends.
+ *
+ * The owner lead-alert template (`new_lead_alert`) starts out "not approved",
+ * as it is in the minutes after a business connects: Meta refuses it and the
+ * alert falls back to text. Pass { ownerAlertApproved: true } to model an
+ * approved one. Refused attempts are kept in `rejected`, not `sent`.
+ */
+export function createFakeWa({ ownerAlertApproved = false } = {}) {
   const sent = [];
+  const rejected = [];
   let counter = 0;
   const accepted = () => ({
     ok: true,
@@ -38,7 +47,16 @@ export function createFakeWa() {
 
   return {
     sent,
+    rejected,
     sendTemplate(to, templateName, languageCode, bodyParams = {}) {
+      if (templateName === "new_lead_alert" && !ownerAlertApproved) {
+        rejected.push({ kind: "template", to, templateName, languageCode, bodyParams });
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          body: { error: { code: 132001, message: "Template name does not exist in the translation" } },
+        });
+      }
       sent.push({ kind: "template", to, templateName, languageCode, bodyParams });
       return Promise.resolve(accepted());
     },

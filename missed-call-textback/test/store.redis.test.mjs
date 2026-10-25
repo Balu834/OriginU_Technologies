@@ -104,3 +104,17 @@ test("markMissedCall / lastMissedCallAt round-trip a numeric timestamp with an e
 test("throws a clear error when Upstash env vars are missing", () => {
   assert.throws(() => createRedisStore({}), /KV_REST_API_URL/);
 });
+
+test("the missed-call timestamp outlives the 10-minute dedupe window", async () => {
+  // The conversation compares it with the last reply to restart a run after
+  // a new missed call; if Redis expired it after 10 minutes, a reply that came
+  // later would carry on the abandoned run.
+  const upstash = fakeUpstash();
+  global.fetch = upstash.fetchImpl;
+  const store = createRedisStore({ KV_REST_API_URL: "https://fake", KV_REST_API_TOKEN: "t" });
+
+  await store.markMissedCall("+919876543210", 1_700_000_000_000);
+  assert.equal(await store.lastMissedCallAt("+919876543210"), 1_700_000_000_000);
+  const ttl = upstash.db.get("missedcall:+919876543210:ttl");
+  assert.ok(ttl >= 7 * 24 * 60 * 60, `expected a multi-day TTL, got ${ttl}s`);
+});

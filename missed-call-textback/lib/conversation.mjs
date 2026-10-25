@@ -12,8 +12,11 @@ import { createLead, formatOwnerNotification } from "./leads.mjs";
 import { logError } from "./logger.mjs";
 import { createMessage, providerMessageId } from "./messages.mjs";
 import { greetingLine, servicesLine, areasLine, compose, ownerNameFor } from "./voice.mjs";
+import { verticalConfig } from "./verticals.mjs";
+import { sendOwnerAlert } from "./ownerAlert.mjs";
 
-const QUESTION_KEY = { problem: "ask_problem", area: "ask_area", name: "ask_name", urgency: "ask_urgency" };
+// A short thank-you after the lead is done is politeness, not a new job.
+const COURTESY_RE = /^\s*(?:ok(?:ay)?|k|thanks?|thank you|thanku|thx|ty|sure|great|cool|done|fine|got it|noted|👍|🙏|🙂|😊)(?:[\s!.,]+(?:ok(?:ay)?|thanks?|thank you|sir|madam|ji|bro|so much|a lot|👍|🙏|🙂|😊))*[\s!.]*$/iu;
 
 function fillTemplate(str, params) {
   return params.reduce((s, p, i) => s.replaceAll(`{{${i + 1}}}`, p), str);
@@ -30,7 +33,11 @@ function freshConversation(callerNumber) {
     runId: crypto.randomUUID(),
     leadId: null,
     fields: {},
-    awaiting: null,
+    // The missed-call template already asked "what you need and your area",
+    // so the first reply answers the problem. Without this the reply went
+    // unclaimed, the bot asked for the problem again, and every later answer
+    // landed one field off (the area saved as the problem, the name as the area).
+    awaiting: "problem",
     emergency: false,
     emergencyNotified: false,
     greeted: false,
@@ -90,6 +97,32 @@ export async function handleInboundMessage(
   // A reply after the lead is already complete is a new job, not more
   // detail for the old one — start clean rather than re-completing (and
   // re-notifying the owner about) the same lead on every later message.
+  const vertical = verticalConfig(context);
+  const lines = templates[vertical.templatesKey] ?? templates._conversation;
+
+  // "Thanks!" after the lead is complete is not a new job. Record it under
+  // the finished run so the owner can see it, and send nothing: starting a
+  // new questionnaire here created a junk second lead and a second alert.
+  if (existing?.completed && !restartedByNewCall && COURTESY_RE.test(String(text ?? ""))) {
+    if (store.saveMessage) {
+      await store.saveMessage(
+        createMessage({
+          conversationId: from,
+          conversationRunId: existing.runId ?? null,
+          leadId: existing.leadId ?? null,
+          direction: "inbound",
+          senderType: "customer",
+          customerPhone: from,
+          messageId,
+          messageType,
+          text,
+          timestamp,
+        })
+      );
+    }
+    return { emergency: false, leadCompleted: false, courtesy: true };
+  }
+
   const conversation = !existing || existing.completed || restartedByNewCall ? freshConversation(from) : existing;
   // Conversations written before run ids existed have none; they stay
   // null and their messages remain unattributable, which is the honest
@@ -97,8 +130,22 @@ export async function handleInboundMessage(
   const runId = conversation.runId ?? null;
 
   /** Records one outbound message alongside sending it, capturing Meta's id. */
-  const sendAndRecord = async (to, body, senderType, leadId = null) => {
-    const result = await wa.sendText(to, body);
+  const sendAndRecord = async (to, body, senderType, leadId = null, alertLead = null) => {
+    // Owner alerts go out as the lead-alert template (no 24-hour window),
+    // falling back to this same text; everything else is plain text.
+    let via = "text";
+    let result;
+    if (alertLead) {
+      ({ result, via } = await sendOwnerAlert(wa, {
+        to,
+        lead: alertLead,
+        businessName: context?.name || config.BUSINESS_NAME,
+        language: config.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+        text: body,
+      }));
+    } else {
+      result = await wa.sendText(to, body);
+    }
     if (store.saveMessage) {
       await store.saveMessage(
         createMessage({
@@ -113,7 +160,7 @@ export async function handleInboundMessage(
           // Acceptance by the API is not delivery; that only arrives later
           // via a status webhook, so this stays null until it does.
           deliveryStatus: null,
-          metadata: { accepted: result?.ok !== false, to },
+          metadata: { accepted: result?.ok !== false, to, ...(alertLead ? { via } : {}) },
         })
       );
     }
@@ -150,14 +197,14 @@ export async function handleInboundMessage(
   // deployment-wide value when no business context was routed in.
   const ownerName = ownerNameFor(context, config.OWNER_NAME);
 
-  if (isEmergency(text) && !conversation.emergency) {
+  if (vertical.emergencyChecks && isEmergency(text) && !conversation.emergency) {
     conversation.emergency = true;
     result.emergency = true;
     // No greeting on a safety message. Someone reporting sparking does
     // not need an introduction first, and a conversation that opens this
     // way never gets one — the register is already set.
     conversation.greeted = true;
-    await sendAndRecord(from, fillTemplate(templates._conversation.emergency_safety, [ownerName]), "assistant");
+    await sendAndRecord(from, fillTemplate(lines.emergency_safety, [ownerName]), "assistant");
 
     if (!conversation.emergencyNotified) {
       conversation.emergencyNotified = true;
@@ -166,7 +213,7 @@ export async function handleInboundMessage(
       // does not exist and can never be deleted, so this stays unassigned
       // and is claimed by the backfill below if the lead completes.
       const partialLead = createLead({ callerNumber: from, fields: conversation.fields, emergency: true });
-      await sendAndRecord(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead), "owner", null);
+      await sendAndRecord(config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(partialLead), "owner", null, partialLead);
     }
     // Fall through into the normal ask/complete flow below — the customer
     // still gets asked whatever's missing (or gets the confirmation, if
@@ -177,7 +224,7 @@ export async function handleInboundMessage(
     // in and get misread as an answer to a later question instead.
   }
 
-  const missing = nextMissingField(conversation.fields);
+  const missing = nextMissingField(conversation.fields, vertical.fieldOrder);
 
   // Decide the whole next state, then persist it BEFORE any outbound send.
   // The webhook marks a message id processed before calling us, so Meta's
@@ -219,7 +266,7 @@ export async function handleInboundMessage(
       from,
       compose(
         greeting,
-        fillTemplate(templates._conversation.lead_confirmation, [conversation.fields.name || "there", ownerName])
+        fillTemplate(lines.lead_confirmation, [conversation.fields.name || "there", ownerName])
       ),
       "assistant",
       lead.id
@@ -228,7 +275,7 @@ export async function handleInboundMessage(
     // Always notify on completion, even after an earlier emergency alert —
     // that alert carried none of the name/area/problem detail this one does.
     const notified = await sendAndRecord(
-      config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead), "owner", lead.id
+      config.MOHAMED_WHATSAPP_NUMBER, formatOwnerNotification(lead), "owner", lead.id, lead
     );
 
     // A lead the owner never hears about is the one failure that destroys
@@ -241,7 +288,7 @@ export async function handleInboundMessage(
     await store.saveLead({ ...lead, ownerNotified, updatedAt: new Date().toISOString() });
     result.ownerNotified = ownerNotified;
   } else {
-    const question = templates._conversation[QUESTION_KEY[missing]];
+    const question = lines[vertical.questionKeys[missing]];
     // Business context attaches to the question it belongs with: what we
     // do when asking what's wrong, where we work when asking the area.
     // Both are empty strings unless the business configured them, so a
