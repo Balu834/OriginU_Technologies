@@ -70,6 +70,10 @@
       "destination": "/api/app"
     },
     {
+      "source": "/settings/whatsapp/assist",
+      "destination": "/api/app"
+    },
+    {
       "source": "/settings/team",
       "destination": "/api/app"
     },

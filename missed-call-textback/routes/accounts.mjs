@@ -13,6 +13,7 @@ import { publicView, integrationState, PHONE_NUMBER_CLAIMED } from "../lib/integ
 import { VERIFIED_MESSAGE, FAILURE_MESSAGES } from "../lib/metaVerify.mjs";
 import { embeddedSignupConfig, signupMessage } from "../lib/embeddedSignup.mjs";
 import { googleSignInAvailable } from "../lib/googleAuth.mjs";
+import { supportWhatsAppDigits } from "./whatsappAssist.mjs";
 import {
   signupPage, onboardingPage, whatsappSettingsPage, teamSettingsPage,
 } from "../lib/settingsViews.mjs";
@@ -180,6 +181,14 @@ async function whatsappSettingsHtml(ctx, deps, actor, { error } = {}) {
     // The two public identifiers the browser needs to open Meta's flow,
     // plus whether it can be opened at all. No secret is in here.
     signup: embeddedSignupConfig(deps.config ?? {}),
+    // "We'll set it up for you": the saved request, the outcome marker
+    // from the assist POST (looked up in a fixed table), and the support
+    // WhatsApp number when one is configured.
+    assist: {
+      request: business?.setupRequest ?? null,
+      notice: ctx.query?.get("a") ?? null,
+      supportDigits: supportWhatsAppDigits(deps.config),
+    },
     canManage: can(actor.role, "manageSettings"),
     role: actor.role,
     actor,

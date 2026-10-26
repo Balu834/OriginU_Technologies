@@ -76,6 +76,12 @@ export function loadConfig(env = process.env, dir = here) {
     // (and a public base URL) the button is simply not shown.
     GOOGLE_CLIENT_ID: merged.GOOGLE_CLIENT_ID ?? "",
     GOOGLE_CLIENT_SECRET: merged.GOOGLE_CLIENT_SECRET ?? "",
+    // "We'll set it up for you" on the WhatsApp page. With a number here
+    // (e.g. +91 98765 43210), an owner's setup request opens a WhatsApp chat
+    // to it with the details typed in. Requests are saved either way, and
+    // emailed to SUPPORT_EMAIL when email is configured.
+    SUPPORT_WHATSAPP_NUMBER: merged.SUPPORT_WHATSAPP_NUMBER ?? "",
+    SUPPORT_EMAIL: merged.SUPPORT_EMAIL ?? "support@originutech.in",
     MISSED_CALL_API_KEY: merged.MISSED_CALL_API_KEY ?? "",
     WHATSAPP_MISSED_CALL_TEMPLATE: merged.WHATSAPP_MISSED_CALL_TEMPLATE ?? "missed_call_immediate",
     WHATSAPP_TEMPLATE_LANGUAGE: merged.WHATSAPP_TEMPLATE_LANGUAGE ?? "en",
