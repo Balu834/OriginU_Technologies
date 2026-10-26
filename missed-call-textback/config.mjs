@@ -70,6 +70,12 @@ export function loadConfig(env = process.env, dir = here) {
     RESEND_API_KEY: merged.RESEND_API_KEY ?? "",
     RESET_EMAIL_FROM: merged.RESET_EMAIL_FROM ?? "",
     PUBLIC_BASE_URL: merged.PUBLIC_BASE_URL ?? "",
+    // "Continue with Google" on the sign-in and sign-up pages. Both come
+    // from a Google Cloud OAuth client (Web application) whose authorised
+    // redirect URI is <PUBLIC_BASE_URL>/auth/google/callback. Without both
+    // (and a public base URL) the button is simply not shown.
+    GOOGLE_CLIENT_ID: merged.GOOGLE_CLIENT_ID ?? "",
+    GOOGLE_CLIENT_SECRET: merged.GOOGLE_CLIENT_SECRET ?? "",
     MISSED_CALL_API_KEY: merged.MISSED_CALL_API_KEY ?? "",
     WHATSAPP_MISSED_CALL_TEMPLATE: merged.WHATSAPP_MISSED_CALL_TEMPLATE ?? "missed_call_immediate",
     WHATSAPP_TEMPLATE_LANGUAGE: merged.WHATSAPP_TEMPLATE_LANGUAGE ?? "en",

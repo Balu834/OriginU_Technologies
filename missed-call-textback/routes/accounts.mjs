@@ -12,6 +12,7 @@ import { businessRecord, onboardingStatus } from "../lib/businesses.mjs";
 import { publicView, integrationState, PHONE_NUMBER_CLAIMED } from "../lib/integrations.mjs";
 import { VERIFIED_MESSAGE, FAILURE_MESSAGES } from "../lib/metaVerify.mjs";
 import { embeddedSignupConfig, signupMessage } from "../lib/embeddedSignup.mjs";
+import { googleSignInAvailable } from "../lib/googleAuth.mjs";
 import {
   signupPage, onboardingPage, whatsappSettingsPage, teamSettingsPage,
 } from "../lib/settingsViews.mjs";
@@ -43,31 +44,31 @@ async function actorFor(ctx, { store, accounts }) {
 
 // ---------------------------------------------------------------- signup
 
-export function handleSignupGet() {
-  return { status: 200, html: signupPage() };
+export function handleSignupGet(ctx, deps) {
+  return { status: 200, html: signupPage({ google: googleSignInAvailable(deps?.config) }) };
 }
 
 export async function handleSignupPost(ctx, deps) {
   const { store, accounts } = deps;
 
   if (await loginRateLimited(ctx, store)) {
-    return { status: 429, html: signupPage({ error: "Too many attempts. Try again later." }) };
+    return { status: 429, html: signupPage({ error: "Too many attempts. Try again later.", google: googleSignInAvailable(deps.config) }) };
   }
 
   const form = formOf(ctx);
   const email = form.get("email") ?? "";
   const password = form.get("password") ?? "";
 
-  if (!isValidEmail(email)) return { status: 400, html: signupPage({ error: "Enter a valid email address.", email }) };
+  if (!isValidEmail(email)) return { status: 400, html: signupPage({ error: "Enter a valid email address.", email, google: googleSignInAvailable(deps.config) }) };
   if (!isAcceptablePassword(password)) {
-    return { status: 400, html: signupPage({ error: "Password must be at least 10 characters.", email }) };
+    return { status: 400, html: signupPage({ error: "Password must be at least 10 characters.", email, google: googleSignInAvailable(deps.config) }) };
   }
 
   const user = await accounts.signUp({ email, password });
   if (!user) {
     // Deliberately the same message whether the email is taken or the
     // input was rejected — signup must not reveal who already has an account.
-    return { status: 400, html: signupPage({ error: "Could not create that account.", email }) };
+    return { status: 400, html: signupPage({ error: "Could not create that account.", email, google: googleSignInAvailable(deps.config) }) };
   }
 
   const sessionId = await createSession(store, null, { userId: user.id });

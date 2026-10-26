@@ -33,6 +33,7 @@ import {
 import { handlePrivacy, handleTerms, handleDataDeletion } from "./legal.mjs";
 import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
 import { handleForgotGet, handleForgotPost, handleResetGet, handleResetPost } from "./passwordReset.mjs";
+import { handleGoogleStart, handleGoogleCallback } from "./googleAuth.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
@@ -58,6 +59,8 @@ const ROUTES = [
   ["GET", "/login", handleLoginPage],
   ["POST", "/login", handleLogin],
   ["POST", "/logout", handleLogout],
+  ["GET", "/auth/google", handleGoogleStart],
+  ["GET", "/auth/google/callback", handleGoogleCallback],
   ["GET", "/forgot-password", handleForgotGet],
   ["POST", "/forgot-password", handleForgotPost],
   ["GET", "/reset-password", handleResetGet],

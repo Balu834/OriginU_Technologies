@@ -15,6 +15,7 @@ import { isValidEmail, normaliseEmail, isAcceptablePassword } from "../lib/users
 import { createMailer } from "../lib/mailer.mjs";
 import { forgotPasswordPage, resetPasswordPage, resetLinkInvalidPage } from "../lib/resetViews.mjs";
 import { loginPage } from "../lib/views.mjs";
+import { googleSignInAvailable } from "../lib/googleAuth.mjs";
 import { log } from "../lib/logger.mjs";
 
 const TOKEN_TTL_SECONDS = 60 * 60;
@@ -91,7 +92,7 @@ export async function handleResetGet(ctx, { store }) {
   return { status: 200, html: resetPasswordPage({ token }) };
 }
 
-export async function handleResetPost(ctx, { store, accounts }) {
+export async function handleResetPost(ctx, { store, accounts, config }) {
   if (await loginRateLimited(ctx, store)) {
     return { status: 429, html: resetLinkInvalidPage() };
   }
@@ -114,5 +115,5 @@ export async function handleResetPost(ctx, { store, accounts }) {
   }
   await store.deleteSession(keyFor(token)); // single use
   log("password_reset_completed", {});
-  return { status: 200, html: loginPage({ notice: "Password updated. Sign in with your new password." }) };
+  return { status: 200, html: loginPage({ notice: "Password updated. Sign in with your new password.", google: googleSignInAvailable(config) }) };
 }

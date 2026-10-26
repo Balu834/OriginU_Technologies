@@ -105,6 +105,34 @@ export function createAccountService(store) {
       return ok && user ? user : null;
     },
 
+    /**
+     * Signs in with a Google identity whose email Google has verified.
+     *
+     * An existing account with that email is linked on first use (the
+     * Google account id is saved), and from then on only that same Google
+     * account can sign in to it this way. A new email gets a new account
+     * with a random password nobody knows; the owner can set a real one
+     * later through "Forgot password?".
+     *
+     * Returns { user, created } or null.
+     */
+    async signInWithGoogle({ email, sub }) {
+      if (!isValidEmail(email) || typeof sub !== "string" || !sub) return null;
+      const existing = await store.getUserByEmail(normaliseEmail(email));
+      if (existing) {
+        if (existing.googleSub && existing.googleSub !== sub) return null;
+        if (!existing.googleSub) {
+          const linked = { ...existing, googleSub: sub, updatedAt: new Date().toISOString() };
+          await store.saveUser(linked);
+          return { user: linked, created: false };
+        }
+        return { user: existing, created: false };
+      }
+      const user = { ...createUser({ email, password: crypto.randomBytes(32).toString("hex") }), googleSub: sub };
+      await store.saveUser(user);
+      return { user, created: true };
+    },
+
     /** Replaces a user's password. False for an unknown user or an unacceptable password. */
     async setPassword(userId, password) {
       if (!isAcceptablePassword(password)) return false;

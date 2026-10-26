@@ -1,5 +1,6 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
 import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
+import { googleSignInAvailable } from "../lib/googleAuth.mjs";
 import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
 import { sendOwnerAlert } from "../lib/ownerAlert.mjs";
 import { createMessage, providerMessageId } from "../lib/messages.mjs";
@@ -38,7 +39,7 @@ export function handleLanding() {
 export async function handleDashboard(ctx, deps) {
   const { store } = deps;
   const session = await currentSession(ctx, store);
-  if (!session) return { status: 200, html: loginPage() };
+  if (!session) return { status: 200, html: loginPage({ google: googleSignInAvailable(deps.config) }) };
 
   const query = {
     q: ctx.query?.get("q") ?? "",
@@ -50,7 +51,7 @@ export async function handleDashboard(ctx, deps) {
   // the dashboard cannot return another tenant's data even if a filter is
   // wrong — the keys simply aren't reachable.
   const tenant = await tenantFor(session, deps);
-  if (!tenant) return noTenantResult(session);
+  if (!tenant) return noTenantResult(session, deps);
 
   const leads = await tenant.store.listLeads();
 
@@ -99,10 +100,10 @@ async function tenantFor(session, { store, businesses, accounts }) {
 }
 
 /** What a session that resolves to no tenant should be shown. */
-function noTenantResult(session) {
+function noTenantResult(session, deps) {
   // Signed in but with no business yet: onboarding, not an error.
   if (session?.userId) return { status: 302, headers: { Location: "/onboarding" }, body: {} };
-  return { status: 200, html: loginPage({ error: "That session is no longer valid. Please sign in again." }) };
+  return { status: 200, html: loginPage({ error: "That session is no longer valid. Please sign in again.", google: googleSignInAvailable(deps?.config) }) };
 }
 
 /**
@@ -115,10 +116,10 @@ function noTenantResult(session) {
 export async function handleLeadDetail(ctx, deps) {
   const { store } = deps;
   const session = await currentSession(ctx, store);
-  if (!session) return { status: 200, html: loginPage() };
+  if (!session) return { status: 200, html: loginPage({ google: googleSignInAvailable(deps.config) }) };
 
   const tenant = await tenantFor(session, deps);
-  if (!tenant) return noTenantResult(session);
+  if (!tenant) return noTenantResult(session, deps);
 
   const id = ctx.query?.get("id") ?? "";
   const lead = await tenant.store.getLead(id);
@@ -151,7 +152,7 @@ export async function handleLeadStatus(ctx, deps) {
   // Same scoping as the read path: a lead id from another tenant simply
   // doesn't resolve here, so it can't be mutated across the boundary.
   const tenant = await tenantFor(session, deps);
-  if (!tenant) return noTenantResult(session);
+  if (!tenant) return noTenantResult(session, deps);
   const tenantStore = tenant.store;
 
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
@@ -206,7 +207,7 @@ export async function handleLeadPriority(ctx, deps) {
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
 
   const tenant = await tenantFor(session, deps);
-  if (!tenant) return noTenantResult(session);
+  if (!tenant) return noTenantResult(session, deps);
   const tenantStore = tenant.store;
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
   const id = form.get("id") ?? "";
@@ -246,7 +247,7 @@ export async function handleRetryNotification(ctx, deps) {
   if (!session) return { status: 302, headers: { Location: "/leads" }, body: {} };
 
   const tenant = await tenantFor(session, deps);
-  if (!tenant) return noTenantResult(session);
+  if (!tenant) return noTenantResult(session, deps);
   const tenantStore = tenant.store;
 
   const form = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
@@ -369,17 +370,17 @@ export async function handleLeadDelete(ctx, deps) {
  * `{"error":"not found"}` JSON. Signed-in visitors go to their leads instead of
  * being shown a login form they do not need.
  */
-export async function handleLoginPage(ctx, { store }) {
+export async function handleLoginPage(ctx, { store, config }) {
   const session = await currentSession(ctx, store);
   if (session) return { status: 302, headers: { Location: "/leads" }, body: {} };
-  return { status: 200, html: loginPage() };
+  return { status: 200, html: loginPage({ google: googleSignInAvailable(config) }) };
 }
 
 /** POST /login — verifies the password and starts a session. */
 export async function handleLogin(ctx, { store, config, businesses, accounts }) {
   if (await loginRateLimited(ctx, store)) {
     log("dashboard_login_rate_limited", {});
-    return { status: 429, html: loginPage({ error: "Too many attempts. Try again later." }) };
+    return { status: 429, html: loginPage({ error: "Too many attempts. Try again later.", google: googleSignInAvailable(config) }) };
   }
 
   const submitted = new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "").get("password") ?? "";
@@ -397,7 +398,7 @@ export async function handleLogin(ctx, { store, config, businesses, accounts }) 
     const user = await accounts.authenticate({ email, password: submitted });
     if (!user) {
       log("dashboard_login_failed", {});
-      return { status: 401, html: loginPage({ error: "Incorrect email or password." }) };
+      return { status: 401, html: loginPage({ error: "Incorrect email or password.", google: googleSignInAvailable(config) }) };
     }
     const memberships = await accounts.membershipsOf(user.id);
     const first = memberships[0] ?? null;
@@ -430,7 +431,7 @@ export async function handleLogin(ctx, { store, config, businesses, accounts }) 
 
   if (!authorised) {
     log("dashboard_login_failed", {});
-    return { status: 401, html: loginPage({ error: "Incorrect password." }) };
+    return { status: 401, html: loginPage({ error: "Incorrect password.", google: googleSignInAvailable(config) }) };
   }
 
   const id = await createSession(store, business?.id ?? "default");
