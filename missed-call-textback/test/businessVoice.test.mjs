@@ -150,14 +150,16 @@ test("a business's own services and areas reach the customer", async () => {
   assert.ok(first.includes(templates._conversation.ask_problem), "the original question was replaced");
 });
 
-test("areas appear when the area is what's being asked", async () => {
+test("the area question is asked plainly, without listing the areas covered", async () => {
+  // "We cover X and Y" right before a customer names another area read as
+  // turning them away; the owner decides from the lead.
   const w = await buildWorld();
   await say(w, PHONE_A, "my ac is not cooling");   // problem captured, area next
 
   const said = await assistantSaid(w.scopedA);
   const areaAsk = said.find((t) => t.includes(templates._conversation.ask_area));
   assert.ok(areaAsk, `no area question was asked: ${JSON.stringify(said)}`);
-  assert.ok(areaAsk.includes("We cover Indiranagar and HSR Layout."), `areas missing: ${areaAsk}`);
+  assert.ok(!areaAsk.includes("We cover"), `areas were listed: ${areaAsk}`);
 });
 
 test("a configured greeting is used verbatim, and only once", async () => {
