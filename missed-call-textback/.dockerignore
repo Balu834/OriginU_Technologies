@@ -1,0 +1,10 @@
+# Build context for qr-gateway/Dockerfile. Only the gateway and two shared
+# lib files are copied; keep everything else, and every secret, out.
+**/node_modules
+.env
+.env*
+data
+logs
+.vercel
+test
+qr-gateway/test

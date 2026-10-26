@@ -35,6 +35,7 @@ import { expiryFromSeconds } from "../lib/integrations.mjs";
 import { reportMissedCall } from "./missedCall.mjs";
 import { log, logError } from "../lib/logger.mjs";
 import { OWNER_ALERT_TEMPLATE } from "../lib/ownerAlert.mjs";
+import { QR_PROVIDER } from "../lib/qrGateway.mjs";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
 
@@ -288,6 +289,17 @@ export async function handleWhatsappTest(ctx, deps) {
     return redirect(`/settings/whatsapp?e=${SIGNUP_FAILURES.MISSING_ASSETS}`);
   }
 
+  // The unofficial QR route has no Meta to ask. Its evidence is the
+  // gateway holding a live linked session for this business.
+  if (integration.provider === QR_PROVIDER) {
+    const reply = deps.qrGateway ? await deps.qrGateway.status(actor.businessId) : { ok: false };
+    const live = reply.ok && reply.body?.status?.state === "connected";
+    if (live) await deps.integrations.markVerified(integration);
+    else await deps.integrations.markVerificationFailed(integration, "whatsapp_offline");
+    log(live ? "integration_verified" : "integration_verification_failed", { businessId: actor.businessId, provider: QR_PROVIDER });
+    return redirect(`/settings/whatsapp?v=${live ? "qrok" : "whatsapp_offline"}`);
+  }
+
   const secrets = deps.integrations.secretsOf(integration);
   const result = await verifyStored(deps, integration, {
     phoneNumberId: integration.phoneNumberId,
@@ -377,6 +389,7 @@ const META_SEND_ERRORS = {
 };
 
 export function testFailureMarker(metaCode) {
+  if (metaCode === "qr_not_connected") return "qroffline";
   return META_SEND_ERRORS[Number(metaCode)] ?? "failed";
 }
 

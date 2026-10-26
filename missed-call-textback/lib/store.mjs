@@ -33,6 +33,7 @@ const EMPTY = () => ({
   usage: {},
   providerSubscriptions: {},
   claims: {},
+  flags: {},
 });
 
 /** Entries with a TTL are stored as { value, expiresAt } — Redis does this natively, the file store has to check by hand. */
@@ -263,6 +264,21 @@ export function createStore(filePath) {
     },
     async deleteSession(id) {
       delete data.sessions[id];
+      persist();
+    },
+
+    // Short-lived, deployment-wide markers (e.g. "this business asked for a
+    // QR link in the last 15 minutes"). Same shape as the Redis version.
+    async saveFlag(key, value, ttlSeconds) {
+      data.flags = data.flags ?? {};
+      data.flags[key] = { value, expiresAt: Date.now() + ttlSeconds * 1000 };
+      persist();
+    },
+    async getFlag(key) {
+      return readExpiring(data.flags ?? {}, key)?.value ?? null;
+    },
+    async deleteFlag(key) {
+      if (data.flags) delete data.flags[key];
       persist();
     },
 

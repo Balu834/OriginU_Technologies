@@ -94,6 +94,7 @@ export function privacyPage() {
           "<strong>Account details:</strong> your name, email address and a hashed password. The password itself is never stored.",
           "<strong>Business details:</strong> business name, industry, phone number, owner name, the services and areas you enter, and team members you invite.",
           "<strong>WhatsApp connection:</strong> your WhatsApp Business Account ID, phone number ID and the access token Meta issues when you connect. The token is stored encrypted.",
+          "<strong>QR-code connection (only if you choose it):</strong> if you link your number by scanning a QR code instead of connecting through Meta, we hold an encrypted login for your WhatsApp as a linked device. While it is linked, every message to your number passes through our service. We act only on messages from people who called you in the last 48 hours and discard the rest without storing them.",
           "<strong>Callers' information:</strong> the phone number that called, the WhatsApp messages exchanged with it, and the lead details taken from that conversation (name, area, what they need, how urgent it is).",
           "<strong>Billing:</strong> your plan and subscription status. Card and UPI details are handled by Razorpay and never reach our servers.",
           "<strong>Technical logs:</strong> request times and error details needed to keep the service running. Logs can include a caller's phone number; they do not include message contents or credentials.",
@@ -113,6 +114,7 @@ export function privacyPage() {
         [
           "<strong>Meta Platforms (WhatsApp Cloud API)</strong> delivers and receives the WhatsApp messages.",
           "<strong>Vercel</strong> hosts the application.",
+          "<strong>Fly.io</strong> hosts the service that keeps QR-code connections open, for businesses that choose that option.",
           "<strong>Upstash</strong> provides the database the application stores its records in.",
           "<strong>Razorpay</strong> processes subscription payments.",
         ],
@@ -158,6 +160,7 @@ export function termsPage() {
           "Messages go out through Meta's WhatsApp Cloud API, so Meta's WhatsApp Business terms and messaging policies apply to you as well as these terms.",
           "Meta decides whether a message template is approved, whether a message is delivered and whether a number stays in good standing. MissedCall cannot override those decisions.",
           "Meta may charge for business-initiated messages. Those charges are between you and Meta and are separate from MissedCall's price.",
+          "If you choose the QR-code connection instead, MissedCall links to your own WhatsApp as a device, the way WhatsApp Web does. This is not an official WhatsApp or Meta service and it is against WhatsApp's terms. WhatsApp may restrict or ban your number without notice. You choose it at your own risk, and MissedCall cannot get a restricted or banned number back for you.",
         ],
       ]],
       ["Acceptable use", [

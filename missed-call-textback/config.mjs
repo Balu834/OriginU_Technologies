@@ -90,6 +90,15 @@ export function loadConfig(env = process.env, dir = here) {
     // MIGRATION-ONLY: the single business allowed to fall back to the
     // global META_* variables. TODO(remove) once its integration is stored.
     MIGRATION_DEFAULT_BUSINESS_ID: merged.MIGRATION_DEFAULT_BUSINESS_ID ?? "default",
+    // --- QR-code WhatsApp connection (UNOFFICIAL, see qr-gateway/README.md) ---
+    // The flag only controls whether the settings page OFFERS it. Businesses
+    // already connected this way keep working while the gateway URL and
+    // secret are set, so switching the flag off can't strand them mid-chat.
+    QR_CONNECT_ENABLED: merged.QR_CONNECT_ENABLED === "1" || merged.QR_CONNECT_ENABLED === "true",
+    // The always-on gateway (Fly.io), e.g. https://missedcall-qr-gateway.fly.dev
+    QR_GATEWAY_URL: merged.QR_GATEWAY_URL ?? "",
+    // Shared HMAC secret, at least 32 characters, same value on the gateway.
+    QR_GATEWAY_SECRET: merged.QR_GATEWAY_SECRET ?? "",
     PORT: Number(merged.PORT ?? 3000),
     DATA_DIR: dataDir,
     DEMO_MODE: merged.DEMO_MODE === "1" || merged.DEMO_MODE === "true",

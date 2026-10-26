@@ -156,6 +156,36 @@ Two things worth knowing:
   number and whether that WABA owns it, and its answer is what gets
   recorded — the same rule the manual form has always followed.
 
+### Third option: scan a QR code (UNOFFICIAL)
+
+For an owner with no Facebook at all, the page can also offer **"Connect by
+scanning a QR code (unofficial)"**. MissedCall then links to the owner's own
+WhatsApp as a linked device, like WhatsApp Web, through a separate always-on
+service in [`qr-gateway/`](qr-gateway/README.md) running on Fly.io (Mumbai).
+
+- **It breaks WhatsApp's terms, and the number can be banned without
+  warning.** The ban lands on the customer's real business number. The page
+  shows these risks first and the owner must tick a box to accept them; who
+  ticked and when is stored on the connection.
+- **Never call it official or Meta-approved.** Only the Facebook route is.
+- Hidden unless `QR_CONNECT_ENABLED=1` and `QR_GATEWAY_URL` /
+  `QR_GATEWAY_SECRET` are set. With the flag off, businesses already linked
+  keep working; nobody new can start.
+- No templates on this route: the missed-call message is the template's
+  wording (from `templates.json`) sent as plain text. No 24-hour rule.
+- The bot replies **only** to someone who missed-called in the last 48 hours
+  or is part-way through the questions. Everyone else who messages the
+  owner's number is ignored and not stored. If the owner types to a
+  customer from the phone, the bot stays out of that chat until they call
+  again.
+- **Owner alerts come from MissedCall's own official number** (the
+  deployment's `META_*` number, `new_lead_alert` template), because a
+  message from the owner's number to itself makes no notification. That
+  template must be approved in MissedCall's own WABA.
+- Code: `lib/qrGateway.mjs` (client, reply rule), `routes/qrEvents.mjs`
+  (`POST /qr/events`, signed, from the gateway), `routes/qrConnect.mjs`
+  (start / status / logout), `lib/qrSigning.mjs` (HMAC both ways).
+
 ## Meta setup (do this before demo day)
 
 1. Create a Meta Business account and a WhatsApp Business app at

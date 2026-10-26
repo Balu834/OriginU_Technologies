@@ -1,0 +1,32 @@
+# MissedCall QR gateway on Fly.io, Mumbai.
+# Deploy from the missed-call-textback folder:
+#   fly deploy . --config qr-gateway/fly.toml --dockerfile qr-gateway/Dockerfile
+# Secrets (fly secrets set ...): KV_REST_API_URL, KV_REST_API_TOKEN,
+# INTEGRATION_ENCRYPTION_KEY, QR_GATEWAY_SECRET, MISSEDCALL_APP_URL.
+app = "missedcall-qr-gateway"
+primary_region = "bom"
+kill_signal = "SIGTERM"
+kill_timeout = 20
+
+[env]
+  PORT = "8080"
+  QR_MAX_SENDS_PER_HOUR = "60"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Sessions are websockets that must stay open: never scale to zero.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

@@ -75,6 +75,17 @@ const STYLES = `
                                letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
   details.advanced[open] > summary { border-bottom:1px solid var(--line); }
   .advanced-body { padding:18px 20px 20px; }
+  .qr-box { display:flex; flex-direction:column; align-items:flex-start; gap:10px; margin:12px 0; }
+  .qr-box img { width:240px; height:240px; background:#fff; padding:8px; border-radius:4px; }
+  .pairing-code { font-family:var(--mono); font-size:28px; letter-spacing:.2em; margin:0; }
+  .risk { margin:0 0 14px; padding:12px 14px; border-left:3px solid var(--urgent); border-radius:2px;
+          background:color-mix(in srgb, var(--urgent) 8%, transparent); font-size:14px; }
+  .risk ul { margin:8px 0 0; padding-left:18px; }
+  .risk li { margin:4px 0; }
+  label.check { display:flex; gap:10px; align-items:flex-start; margin:12px 0; font-family:var(--sans);
+                font-size:14px; letter-spacing:normal; text-transform:none; color:var(--ink); }
+  label.check span { min-width:0; }
+  .check input { width:auto; flex:none; margin-top:3px; }
   .warn { margin:0 0 16px; padding:10px 12px; font-size:13.5px; border-radius:2px;
           border-left:3px solid var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent);
           color:var(--muted); }
@@ -217,9 +228,12 @@ export function onboardingPage({ error, values = {} } = {}) {
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
   error, verification = null, failure = null, signup = null, templates = null, testMessage = null,
-  business: shellBusiness = null, actor = null,
+  business: shellBusiness = null, actor = null, qr = null,
 } = {}) {
   const connected = status === "CONNECTED";
+  // The unofficial QR-code route (lib/qrGateway.mjs) has its own cards.
+  const isQr = integration?.provider === "whatsapp_qr";
+  const qrParts = qrSections({ business, integration, status, isQr, canManage, qr });
 
   // Embedded Signup tokens expire. An expired one cannot send and cannot be
   // refreshed, so the page has to say so and offer the Connect button again
@@ -321,6 +335,8 @@ export function whatsappSettingsPage({
         : `<p class="hint" style="margin-top:14px">Your role (${escapeHtml(role || "STAFF")}) can view this connection but not change it.</p>`}
     </div>`;
 
+  const shownSuccess = isQr ? qrParts.success : success;
+
   // Not connected. One button, no jargon, and an honest explanation when
   // the button genuinely cannot work yet.
   const connectCard = `
@@ -358,7 +374,9 @@ export function whatsappSettingsPage({
 
   // A stored-but-unproven or rejected connection. Says which, and what to
   // do about it, without showing anything technical.
-  const interim = !connected && integration
+  const interim = isQr
+    ? qrParts.interim
+    : !connected && integration
     ? `<div class="card">
          <p class="hint" style="margin:0 0 10px">
            ${status === "ERROR"
@@ -466,15 +484,199 @@ export function whatsappSettingsPage({
     ${templatesNotice}
     ${testMessageNotice}
     ${failureNotice}
+    ${qrParts.notice}
+    ${qrParts.live}
     ${connected && !tokenIsExpired
-      ? `${success}${steps}`
+      ? `${shownSuccess}${steps}`
       : connected
       ? `${expiredCard}${connectCard}`
-      : `${connectCard}${interim}<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
+      : `${connectCard}${interim}${qrParts.option}<div class="notice">WhatsApp is not connected yet, so no leads can be captured.${steps}</div>`}
     ${advanced}
     ${settingsNav("/settings/whatsapp")}`,
-    canManage && signup?.available && (!connected || tokenIsExpired) ? embeddedSignupScript(signup) : "",
+    (canManage && signup?.available && (!connected || tokenIsExpired) ? embeddedSignupScript(signup) : "") + qrParts.script,
     { active: "/settings/whatsapp", business: shellBusiness ?? business, actor });
+}
+
+/**
+ * The UNOFFICIAL QR-code connection's parts of the WhatsApp page.
+ *
+ * Copy rules this code keeps:
+ * - It is never called official, approved, verified or "secure through
+ *   Meta". The Facebook button is the official route; this one says
+ *   "unofficial" wherever it appears.
+ * - The risks are shown before the QR, in plain words, and the owner must
+ *   tick a box to say they accept them.
+ *
+ * The QR itself is fetched by the page from /settings/whatsapp/qr/status
+ * and shown in an <img>; it is never written into the markup.
+ */
+const QR_NOTICES = {
+  ack: { ok: false, message: "Tick the box to say you understand the risks, then press Start." },
+  phone: { ok: false, message: "Enter the business WhatsApp number with its country code, for example +919876543210." },
+  down: { ok: false, message: "The QR-code service isn't reachable right now. Try again in a minute." },
+  off: { ok: false, message: "Connecting by QR code isn't available on this account." },
+  official: { ok: false, message: "This business is already connected the official way, through Facebook. That stays as it is." },
+  loggedout: { ok: true, message: "Logged out. MissedCall is no longer linked to your WhatsApp, and its stored login was deleted." },
+  connected: { ok: true, message: "Linked. Missed calls are now answered from your own WhatsApp number." },
+};
+
+export const QR_RISK_POINTS = [
+  "This is <strong>not an official WhatsApp or Meta connection</strong>. It links MissedCall to your WhatsApp as a device, the way WhatsApp Web does, which WhatsApp's terms don't allow.",
+  "<strong>WhatsApp can ban your number without warning</strong>, for a while or for good, and we can't get it back for you.",
+  "A ban hits <strong>your real business number</strong>: the one on your board, your Google listing and your visiting cards. Customers couldn't reach you on WhatsApp.",
+  "As a linked device, MissedCall can see every message to your number. It only answers people who missed-called you in the last 48 hours, and ignores and doesn't keep anything else.",
+  "It keeps working only while your phone goes online every few days. If WhatsApp unlinks it, we email you.",
+];
+
+// Why a QR link went to ERROR. Same sentences as QR_FAILURE_MESSAGES in
+// lib/qrGateway.mjs, with "press Reconnect" where the button is right here.
+const QR_FAILURE_TEXT = {
+  whatsapp_logged_out: "WhatsApp unlinked MissedCall from your phone (Linked devices). Press Reconnect to link it again.",
+  whatsapp_number_blocked: "WhatsApp blocked this number from being used through a linked device. Connect with Facebook (official) instead, or contact us.",
+  whatsapp_disconnected: "MissedCall lost its connection to your WhatsApp. Press Reconnect.",
+  whatsapp_session_replaced: "Your WhatsApp login was opened somewhere else, so MissedCall was disconnected. Press Reconnect.",
+  whatsapp_offline: "MissedCall isn't connected to your WhatsApp right now. Press Reconnect.",
+};
+
+function qrSections({ business, integration, status, isQr, canManage, qr }) {
+  const parts = { notice: "", live: "", option: "", success: "", interim: "", script: "" };
+  const notice = qr?.notice ? QR_NOTICES[qr.notice] : null;
+  if (notice) {
+    parts.notice = `<div class="card" style="margin-bottom:12px${notice.ok ? "" : ";border-color:var(--urgent)"}">
+         <p class="hint" style="margin:0">${notice.ok ? "✓ " : "✕ "}${escapeHtml(notice.message)}</p>
+       </div>`;
+  }
+
+  const reconnectForm = `<form method="POST" action="/settings/whatsapp/qr/start">
+         <input type="hidden" name="mode" value="qr">
+         <button type="submit">Reconnect</button>
+       </form>`;
+  const logoutForm = `<form method="POST" action="/settings/whatsapp/qr/logout"
+         onsubmit="return confirm('Log out? MissedCall stops answering missed calls on this number until you link it again.')">
+         <button type="submit" class="ghost">Log out</button>
+       </form>`;
+
+  // While a link is in progress: the live QR / code, filled in by the script.
+  if (qr?.polling && canManage) {
+    parts.live = `<div class="card" id="qr" style="margin-bottom:12px">
+         <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">Link WhatsApp (unofficial)</h2>
+         <p class="hint" id="qr-msg" role="status" aria-live="polite" style="margin:0">Starting…</p>
+         <div class="qr-box">
+           <img id="qr-img" alt="QR code to scan with WhatsApp" hidden>
+           <p class="pairing-code" id="qr-code" hidden></p>
+         </div>
+         <p class="hint" style="margin:0">It shows as <strong>Chrome (Ubuntu)</strong> in WhatsApp → Linked devices.</p>
+         <div class="actions" style="margin-top:12px">${logoutForm}</div>
+       </div>`;
+    parts.script = qrPollScript();
+  }
+
+  // Offered only where the official routes are: not connected yet.
+  if (qr?.available && canManage && !isQr && status !== "CONNECTED") {
+    parts.option = `
+    <details class="card advanced" id="qr-option"${notice && !notice.ok ? " open" : ""}>
+      <summary>No Facebook at all? Connect by scanning a QR code (unofficial)</summary>
+      <div class="advanced-body">
+        <div class="risk">
+          <strong>Read this first.</strong>
+          <ul>${QR_RISK_POINTS.map((p) => `<li>${p}</li>`).join("")}</ul>
+        </div>
+        <p class="hint" style="margin:0 0 12px">The official way is <strong>Connect WhatsApp with Facebook</strong> above, or ask us to set it up for you.</p>
+        <form method="POST" action="/settings/whatsapp/qr/start">
+          <label class="check"><input type="radio" name="mode" value="qr" checked>
+            <span>Show a QR code. Scan it with the business phone (this page is open on another screen).</span></label>
+          <label class="check"><input type="radio" name="mode" value="code">
+            <span>I'm on the business phone. Give me a code to type into WhatsApp instead.</span></label>
+          <label for="qr-phone">Business WhatsApp number (only needed for the code)</label>
+          <input type="tel" id="qr-phone" name="phone" placeholder="+919876543210" autocomplete="off">
+          <label class="check"><input type="checkbox" name="ack" value="yes" required>
+            <span>I understand my number can be banned by WhatsApp, and that this is not an official WhatsApp or Meta connection.</span></label>
+          <button type="submit" class="full">Start</button>
+        </form>
+      </div>
+    </details>`;
+  }
+
+  if (isQr && status === "CONNECTED") {
+    parts.success = `
+    <div class="card connected-card">
+      <h2 style="font-family:var(--display);font-size:20px;margin:0 0 4px">✓ WhatsApp linked by QR code</h2>
+      <p class="hint" style="margin:0 0 12px">
+        Missed-call replies go out from your own WhatsApp number. <strong>Unofficial connection:</strong>
+        WhatsApp can ban the number. Lead alerts come to you from MissedCall's own WhatsApp number, so save it.
+      </p>
+      <dl class="facts">
+        <dt>Business</dt><dd>${escapeHtml(business?.name || "—")}</dd>
+        <dt>WhatsApp</dt><dd>${escapeHtml(integration?.displayPhoneNumber || "Linked number")}</dd>
+        <dt>Status</dt><dd><span class="state CONNECTED">Connected (unofficial)</span></dd>
+        <dt>Shows as</dt><dd>Chrome (Ubuntu), in WhatsApp → Linked devices</dd>
+      </dl>
+      ${canManage
+        ? `<div class="actions">
+             <form method="POST" action="/settings/whatsapp/test"><button type="submit">Test Connection</button></form>
+             ${reconnectForm}
+             ${logoutForm}
+             <a class="btn-link ghost" href="/dashboard">Continue to Dashboard</a>
+           </div>
+           <form method="POST" action="/settings/whatsapp/send-test" style="margin-top:16px">
+             <label class="field" for="test-number">Send a test message</label>
+             <div class="actions">
+               <input type="tel" id="test-number" name="number" placeholder="+919876543210" autocomplete="off" required style="max-width:240px">
+               <button type="submit">Send test message</button>
+             </div>
+           </form>
+           <p class="hint" style="margin-top:10px">
+             Sends your missed-call message to this number from your WhatsApp, exactly as a caller receives it.
+             It counts as one message on your plan.
+           </p>`
+        : ""}
+    </div>`;
+  }
+
+  if (isQr && status === "ERROR") {
+    parts.interim = `<div class="card" style="margin-bottom:12px;border-color:var(--urgent)">
+         <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">WhatsApp (QR link) is disconnected.</h2>
+         <p class="hint" style="margin:0 0 12px">${escapeHtml(QR_FAILURE_TEXT[integration?.lastError] ?? "MissedCall isn't connected to your WhatsApp right now.")}
+           Missed-call replies are paused.</p>
+         ${canManage ? `<div class="actions">${reconnectForm}${logoutForm}</div>` : ""}
+       </div>`;
+  }
+  return parts;
+}
+
+/**
+ * Polls the link status every 3 seconds for up to 5 minutes and draws the
+ * QR (an <img> fed only a PNG data URL) or the pairing code. Stops on a
+ * final state; goes to the connected page once linked.
+ */
+function qrPollScript() {
+  return `<script>
+(function () {
+  var img = document.getElementById("qr-img");
+  var code = document.getElementById("qr-code");
+  var msg = document.getElementById("qr-msg");
+  if (!msg) return;
+  var FINAL = { expired: 1, failed: 1, claimed: 1, banned: 1, logged_out: 1, idle: 1 };
+  var started = Date.now();
+  function tick() {
+    if (Date.now() - started > 5 * 60 * 1000) { msg.textContent = "Stopped waiting. Press Start or Reconnect to try again."; return; }
+    fetch("/settings/whatsapp/qr/status", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.connected) { window.location.href = "/settings/whatsapp?q=connected"; return; }
+        msg.textContent = s.message || "";
+        if (s.qrDataUrl && s.qrDataUrl.indexOf("data:image/png;base64,") === 0) { img.src = s.qrDataUrl; img.hidden = false; }
+        else { img.hidden = true; }
+        if (s.pairingCode) { code.textContent = s.pairingCode; code.hidden = false; } else { code.hidden = true; }
+        // "idle" right after Start just means the gateway is still opening.
+        if (FINAL[s.state] && Date.now() - started > 8000) return;
+        setTimeout(tick, 3000);
+      })
+      .catch(function () { setTimeout(tick, 5000); });
+  }
+  tick();
+})();
+</script>`;
 }
 
 /**

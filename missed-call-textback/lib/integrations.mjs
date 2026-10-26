@@ -183,7 +183,7 @@ export function createIntegrationService(store, config) {
     };
   }
 
-  return {
+  const service = {
     async forBusiness(businessId) {
       if (!businessId) return null;
       const stored = await store.getIntegrationByBusiness?.(businessId);
@@ -332,5 +332,57 @@ export function createIntegrationService(store, config) {
       await store.saveIntegration(updated);
       return updated;
     },
+
+    /**
+     * Records a QR-code (linked device) connection. UNOFFICIAL route: see
+     * lib/qrGateway.mjs.
+     *
+     * Called only when the gateway reports a live linked session for this
+     * business, which is this route's evidence the same way Meta's answer
+     * is for the official one. Goes through register(), so the "one number,
+     * one business" rule holds here too: the number is stored as
+     * `qr:<digits>` and a number another business already has is refused.
+     * Nothing secret is stored on the record; the WhatsApp session itself
+     * lives encrypted in the gateway's keys.
+     */
+    async registerQr({ businessId, phone, acknowledgement = null }, at = new Date().toISOString()) {
+      const digits = String(phone ?? "").replace(/\D/g, "");
+      if (!/^\d{8,15}$/.test(digits)) throw new Error("registerQr needs the linked phone number");
+      const before = await store.getIntegrationByBusiness?.(businessId);
+      const integration = await service.register({
+        businessId,
+        provider: "whatsapp_qr",
+        phoneNumberId: `qr:${digits}`,
+        displayPhoneNumber: `+${digits}`,
+        status: "CONNECTED",
+      });
+      const updated = {
+        ...integration,
+        lastVerifiedAt: at,
+        lastError: null,
+        // Who accepted the risk warning, and when. Kept across reconnects.
+        qrAcknowledgement: acknowledgement ?? (before?.provider === "whatsapp_qr" ? before.qrAcknowledgement ?? null : null),
+        updatedAt: at,
+      };
+      await store.saveIntegration(updated);
+      return updated;
+    },
+
+    /**
+     * The owner disconnected on purpose. The record stays (so the page can
+     * say what happened) but stops claiming the number, so it can be
+     * connected again here or by another route.
+     */
+    async markDisconnected(integration, reason, at = new Date().toISOString()) {
+      if (!integration || integration._legacy) return integration;
+      const updated = { ...integration, status: "NOT_CONNECTED", lastError: String(reason ?? "disconnected"), updatedAt: at };
+      await store.saveIntegration(updated);
+      if (integration.phoneNumberId) {
+        await store.releasePhoneNumberMapping?.(integration.phoneNumberId, integration.id);
+      }
+      return updated;
+    },
   };
+
+  return service;
 }

@@ -385,6 +385,19 @@ export function createRedisStore(env = process.env) {
       await command("DEL", `session:${id}`);
     },
 
+    // Short-lived, deployment-wide markers under their own prefix, kept apart
+    // from `session:` so a marker can never be read back as a login.
+    async saveFlag(key, value, ttlSeconds) {
+      await command("SET", `flag:${key}`, JSON.stringify(value), "EX", String(ttlSeconds));
+    },
+    async getFlag(key) {
+      const raw = await command("GET", `flag:${key}`);
+      return raw ? JSON.parse(raw) : null;
+    },
+    async deleteFlag(key) {
+      await command("DEL", `flag:${key}`);
+    },
+
     /** Increments a windowed counter and returns the new count — used to throttle login attempts. */
     async bumpRateLimit(key, windowSeconds) {
       const count = await command("INCR", `ratelimit:${key}`);

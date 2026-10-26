@@ -70,6 +70,18 @@
       "destination": "/api/app"
     },
     {
+      "source": "/settings/whatsapp/qr/start",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/whatsapp/qr/status",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/whatsapp/qr/logout",
+      "destination": "/api/app"
+    },
+    {
       "source": "/settings/team",
       "destination": "/api/app"
     },
@@ -92,6 +104,10 @@
     {
       "source": "/webhook",
       "destination": "/api/webhook"
+    },
+    {
+      "source": "/qr/events",
+      "destination": "/api/qr-events"
     },
     {
       "source": "/billing/create-subscription",

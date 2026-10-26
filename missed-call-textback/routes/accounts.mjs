@@ -18,6 +18,7 @@ import {
 } from "../lib/settingsViews.mjs";
 import { log, logError } from "../lib/logger.mjs";
 import { toE164 } from "../lib/phone.mjs";
+import { qrConnectConfig, QR_FAILURE_MESSAGES } from "../lib/qrGateway.mjs";
 import crypto from "node:crypto";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
@@ -184,6 +185,13 @@ async function whatsappSettingsHtml(ctx, deps, actor, { error } = {}) {
     role: actor.role,
     actor,
     error,
+    // The unofficial QR-code option: offered only with the flag on and a
+    // gateway wired. `q` is one of a fixed set of markers.
+    qr: {
+      available: qrConnectConfig(deps.config ?? {}).available && Boolean(deps.qrGateway),
+      notice: ctx.query?.get("q") ?? null,
+      polling: ctx.query?.get("q") === "started",
+    },
   });
 }
 
@@ -215,6 +223,7 @@ const TEST_MESSAGE_OUTCOMES = {
   unregistered: { ok: false, message: "Your WhatsApp number isn't fully registered with Meta yet. Press Test Connection, or connect WhatsApp again." },
   token: { ok: false, message: "Your WhatsApp connection has expired. Connect WhatsApp again to renew it." },
   busy: { ok: false, message: "Too many messages went to that number in a short time. Wait a few minutes and try again." },
+  qroffline: { ok: false, message: "MissedCall isn't connected to your WhatsApp right now, so nothing was sent. Press Reconnect, then try again." },
 };
 
 function testMessageNotice(marker) {
@@ -225,7 +234,8 @@ function testMessageNotice(marker) {
 function verificationNotice(code) {
   if (!code) return null;
   if (code === "ok") return { ok: true, message: VERIFIED_MESSAGE };
-  return { ok: false, message: FAILURE_MESSAGES[code] ?? "Verification failed." };
+  if (code === "qrok") return { ok: true, message: "MissedCall is linked to your WhatsApp and running." };
+  return { ok: false, message: FAILURE_MESSAGES[code] ?? QR_FAILURE_MESSAGES[code] ?? "Verification failed." };
 }
 
 export async function handleWhatsappSettingsPost(ctx, deps) {
