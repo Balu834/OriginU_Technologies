@@ -15,6 +15,7 @@
  * it on Indian mobile data.
  */
 import { appShell, SHELL_STYLES } from "./shell.mjs";
+import { googleButtonHtml, GOOGLE_BUTTON_STYLES } from "./googleAuth.mjs";
 
 import { LEAD_STATUSES, STATUS_LABELS, isValidStatus, leadPriority, allowedTransitions } from "./leads.mjs";
 
@@ -250,17 +251,18 @@ export function barePage(title, body) {
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
-<style>${SHELL_STYLES}${STYLES}</style>
+<style>${SHELL_STYLES}${STYLES}${GOOGLE_BUTTON_STYLES}</style>
 </head><body><div class="wrap">${body}</div></body></html>`;
 }
 
-export function loginPage({ error, notice } = {}) {
+export function loginPage({ error, notice, google = false } = {}) {
   return barePage("Sign in", `
     <div class="gate">
       <div class="plate">MissedCall</div>
       <h1>Leads</h1>
       <p class="sub">Missed calls that turned into conversations.</p>
       <form method="POST" action="/login">
+        ${google ? googleButtonHtml() : ""}
         <label class="field" for="email">Email</label>
         <input type="email" id="email" name="email" autocomplete="email" style="margin-bottom:14px">
         <label class="field" for="password">Password</label>

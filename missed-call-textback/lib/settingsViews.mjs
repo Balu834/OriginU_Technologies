@@ -6,6 +6,7 @@
  * is handed `publicView(integration)`, which cannot contain one.
  */
 import { escapeHtml } from "./views.mjs";
+import { googleButtonHtml, GOOGLE_BUTTON_STYLES } from "./googleAuth.mjs";
 import { appShell, SHELL_STYLES } from "./shell.mjs";
 
 const STYLES = `
@@ -102,7 +103,7 @@ function page(title, body, script = "", { active = "", business = null, actor = 
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
-<style>${SHELL_STYLES}${STYLES}</style>
+<style>${SHELL_STYLES}${STYLES}${GOOGLE_BUTTON_STYLES}</style>
 </head><body><div class="wrap">${body}</div>${script}</body></html>`;
   }
   return appShell({
@@ -124,12 +125,13 @@ function jsonForScript(value) {
 
 const errorBlock = (error) => (error ? `<p class="error">${escapeHtml(error)}</p>` : "");
 
-export function signupPage({ error, email = "" } = {}) {
+export function signupPage({ error, email = "", google = false } = {}) {
   return page("Create account", `
     <div class="plate">MissedCall</div>
     <h1>Create your account</h1>
     <p class="sub">One account, then you'll set up your business.</p>
     <form class="card" method="POST" action="/signup" style="margin-top:22px">
+      ${google ? googleButtonHtml("Sign up with Google") : ""}
       <label for="email">Email</label>
       <input type="email" id="email" name="email" value="${escapeHtml(email)}" autocomplete="email" required>
       <label for="password">Password</label>

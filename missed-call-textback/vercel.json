@@ -34,6 +34,14 @@
       "destination": "/api/app"
     },
     {
+      "source": "/auth/google",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/auth/google/callback",
+      "destination": "/api/app"
+    },
+    {
       "source": "/signup",
       "destination": "/api/app"
     },

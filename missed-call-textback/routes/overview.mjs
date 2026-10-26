@@ -14,10 +14,11 @@ import { integrationState } from "../lib/integrations.mjs";
 import { onboardingStatus } from "../lib/businesses.mjs";
 import { overviewPage, RANGES } from "../lib/overviewView.mjs";
 import { loginPage } from "../lib/views.mjs";
+import { googleSignInAvailable } from "../lib/googleAuth.mjs";
 
 export async function handleOverview(ctx, deps) {
   const session = await currentSession(ctx, deps.store);
-  if (!session) return { status: 200, html: loginPage() };
+  if (!session) return { status: 200, html: loginPage({ google: googleSignInAvailable(deps.config) }) };
 
   const actor = await resolveActor(session, deps.accounts);
   if (!actor?.businessId) {
