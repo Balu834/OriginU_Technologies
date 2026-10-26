@@ -130,3 +130,14 @@ test("the owner messaging their own business number is not treated as a customer
   assert.equal(await w.scoped.getConversation(OWNER), null, "no conversation started for the owner");
   assert.equal(w.wa.sent.length, 0);
 });
+
+test("a refused test message says Meta's actual reason, not a generic failure", async () => {
+  const { testFailureMarker } = await import("../routes/whatsappConnect.mjs");
+  assert.equal(testFailureMarker(131030), "allowlist", "Meta's test number, recipient not on the allowed list");
+  assert.equal(testFailureMarker("131026"), "notwa");
+  assert.equal(testFailureMarker(132001), "template");
+  assert.equal(testFailureMarker(131042), "payment");
+  assert.equal(testFailureMarker(190), "token");
+  assert.equal(testFailureMarker(999999), "failed");
+  assert.equal(testFailureMarker(undefined), "failed");
+});

@@ -357,6 +357,29 @@ export async function handleWhatsappTemplates(ctx, deps) {
  * The number travels in the form body and is never put in the redirect;
  * the URL carries one marker from a fixed list.
  */
+/**
+ * Meta's error code for a refused send, turned into one of the fixed
+ * markers the settings page explains. An owner who sees "did not accept"
+ * cannot act on it; "add this number to the test list" they can.
+ */
+const META_SEND_ERRORS = {
+  131030: "allowlist", // Meta's free test number: recipient not on its allowed list
+  131026: "notwa", // recipient is not on WhatsApp / cannot receive
+  132000: "template", // template parameter mismatch
+  132001: "template", // template does not exist / not approved in this language
+  132015: "template", // template paused
+  132016: "template", // template disabled
+  131042: "payment", // no valid payment method on the WhatsApp account
+  133010: "unregistered", // the business number is not registered with Cloud API
+  190: "token", // access token expired or revoked
+  131056: "busy", // too many messages to this pair in a short time
+  130429: "busy", // throughput limit
+};
+
+export function testFailureMarker(metaCode) {
+  return META_SEND_ERRORS[Number(metaCode)] ?? "failed";
+}
+
 export async function handleWhatsappSendTest(ctx, deps) {
   const actor = await actorFor(ctx, deps);
   if (!actor?.businessId) return redirect(SIGN_IN);
@@ -380,9 +403,9 @@ export async function handleWhatsappSendTest(ctx, deps) {
     : result.status === 400 ? "number"
     : result.status === 402 ? "limit"
     : result.status === 503 ? "unconnected"
-    : "failed";
+    : testFailureMarker(body.metaError?.code);
 
-  log("whatsapp_test_message", { businessId: actor.businessId, outcome });
+  log("whatsapp_test_message", { businessId: actor.businessId, outcome, metaCode: body.metaError?.code ?? null });
   return redirect(`/settings/whatsapp?m=${outcome}`);
 }
 

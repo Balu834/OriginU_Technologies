@@ -206,6 +206,14 @@ const TEST_MESSAGE_OUTCOMES = {
   limit: { ok: false, message: "Your plan's monthly message limit has been reached, so the test was not sent." },
   unconnected: { ok: false, message: "WhatsApp is not connected for this business yet, so nothing could be sent." },
   failed: { ok: false, message: "WhatsApp did not accept the message. Check that the number is on WhatsApp and try again." },
+  // The specific reasons Meta gives, said so the owner knows what to do.
+  allowlist: { ok: false, message: "This is Meta's free test number, which can only message up to 5 numbers you add first. In Meta for Developers, open your app, then WhatsApp > API Setup > To > Manage phone number list, add the number and verify it. Or connect your real business number, which can message anyone." },
+  notwa: { ok: false, message: "That number isn't on WhatsApp, or can't receive messages right now. Try a number that uses WhatsApp." },
+  template: { ok: false, message: "Your missed-call message isn't approved by Meta yet. Press Create message templates, then try again once Meta approves it (usually within minutes, sometimes up to a day)." },
+  payment: { ok: false, message: "Meta needs a payment method on your WhatsApp account before it sends this message. Add one in WhatsApp Manager under Payment settings, then try again." },
+  unregistered: { ok: false, message: "Your WhatsApp number isn't fully registered with Meta yet. Press Test Connection, or connect WhatsApp again." },
+  token: { ok: false, message: "Your WhatsApp connection has expired. Connect WhatsApp again to renew it." },
+  busy: { ok: false, message: "Too many messages went to that number in a short time. Wait a few minutes and try again." },
 };
 
 function testMessageNotice(marker) {
