@@ -11,7 +11,7 @@ import { extractFields, applyAwaitingFallback, nextMissingField } from "./extrac
 import { createLead, formatOwnerNotification } from "./leads.mjs";
 import { logError } from "./logger.mjs";
 import { createMessage, providerMessageId } from "./messages.mjs";
-import { greetingLine, servicesLine, areasLine, compose, ownerNameFor } from "./voice.mjs";
+import { greetingLine, servicesLine, compose, ownerNameFor } from "./voice.mjs";
 import { verticalConfig } from "./verticals.mjs";
 import { sendOwnerAlert } from "./ownerAlert.mjs";
 
@@ -289,14 +289,12 @@ export async function handleInboundMessage(
     result.ownerNotified = ownerNotified;
   } else {
     const question = lines[vertical.questionKeys[missing]];
-    // Business context attaches to the question it belongs with: what we
-    // do when asking what's wrong, where we work when asking the area.
-    // Both are empty strings unless the business configured them, so a
-    // business that configures nothing sends exactly the message this
-    // product sent before any of this existed.
-    const detail = missing === "problem" ? servicesLine(context)
-      : missing === "area" ? areasLine(context)
-        : "";
+    // What the business does attaches to the question about what's wrong
+    // (empty unless the business configured services). The area question is
+    // asked plainly: listing "We cover X and Y" right before the customer
+    // names some other area read as a refusal, and whether to take a job
+    // outside the usual areas is the owner's call, made from the lead.
+    const detail = missing === "problem" ? servicesLine(context) : "";
 
     await sendAndRecord(
       from,
