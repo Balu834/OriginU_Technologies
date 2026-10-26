@@ -33,6 +33,11 @@ const STYLES = `
                   border-radius:3px; background:var(--bg); color:var(--ink); font-family:var(--sans); }
   input:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
   .hint { font-size:12.5px; color:var(--muted); margin:5px 0 0; }
+  .choice-label { font-weight:600; font-size:15px; margin:0 0 6px; }
+  .assist-card { margin-top:12px; }
+  .assist-note { margin:0 0 10px; color:var(--accent); }
+  .assist-note.bad { color:var(--urgent); }
+  button.ghost.assist-btn { margin-top:16px; min-height:44px; color:var(--accent); border-color:var(--accent); font-weight:600; }
   button { margin-top:18px; min-height:46px; padding:0 20px; font-size:15px; font-weight:600;
            border:0; border-radius:3px; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
   button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); min-height:34px;
@@ -214,10 +219,66 @@ export function onboardingPage({ error, values = {} } = {}) {
  * 2. Invent a status. Everything shown comes from the persisted
  *    integration record handed in by the route.
  */
+export const ASSIST_TIMES = {
+  morning: "Morning (9 AM to 12 PM)",
+  afternoon: "Afternoon (12 PM to 4 PM)",
+  evening: "Evening (4 PM to 8 PM)",
+  anytime: "Any time",
+};
+
+const ASSIST_NOTICES = {
+  sent: { ok: true, text: "Request received. We'll call you at the time you picked to connect your WhatsApp." },
+  bad: { ok: false, text: "That doesn't look like a phone number. Enter it with the country code, like +91 98765 43210." },
+  fail: { ok: false, text: "We couldn't save your request. Please try again in a moment." },
+};
+
+/**
+ * "No Facebook? We'll set it up for you." The owner gives the number and a
+ * time to call; we do the Facebook part and they only read out the code
+ * WhatsApp texts them. Shows the request once it has been made.
+ */
+function assistCard({ assist, business, numbered = false }) {
+  const request = assist?.request ?? null;
+  const notice = ASSIST_NOTICES[assist?.notice] ?? null;
+  const when = request?.requestedAt
+    ? new Date(request.requestedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+    : "";
+  const number = request?.number || business?.businessPhone || "";
+  const options = Object.entries(ASSIST_TIMES)
+    .map(([value, label]) => `<option value="${value}"${request?.bestTime === value ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const chat = assist?.supportDigits
+    ? ` or <a href="https://wa.me/${escapeHtml(assist.supportDigits)}">message us on WhatsApp</a>`
+    : "";
+
+  return `
+    <div class="card assist-card">
+      <p class="choice-label">${numbered ? "Option 2 · " : ""}No Facebook? We'll set it up for you</p>
+      <p class="hint" style="margin:0 0 12px">
+        Tell us your WhatsApp number and when to call. We do the Facebook part for you. You only read
+        us the 6-digit code WhatsApp sends to your phone. It takes about 10 minutes, and we'll explain
+        what changes for the WhatsApp app on your phone before anything is switched over.
+      </p>
+      ${notice ? `<p class="hint assist-note${notice.ok ? "" : " bad"}" role="status">${notice.ok ? "✓ " : "✕ "}${escapeHtml(notice.text)}</p>` : ""}
+      ${request && !notice
+        ? `<p class="hint assist-note" role="status">✓ Requested on ${escapeHtml(when)} for ${escapeHtml(request.number)}.
+             We'll call you: ${escapeHtml((ASSIST_TIMES[request.bestTime] ?? ASSIST_TIMES.anytime).toLowerCase())}.
+             Nothing else to do${chat}.</p>`
+        : ""}
+      <form method="POST" action="/settings/whatsapp/assist">
+        <label for="assist-number">WhatsApp number to connect</label>
+        <input type="tel" id="assist-number" name="number" value="${escapeHtml(number)}" placeholder="+91 98765 43210" autocomplete="tel" required>
+        <label for="assist-time">Best time to call you</label>
+        <select id="assist-time" name="bestTime">${options}</select>
+        <button type="submit" class="full ghost assist-btn">${request ? "Update my request" : "Set it up for me"}</button>
+      </form>
+    </div>`;
+}
+
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
   error, verification = null, failure = null, signup = null, templates = null, testMessage = null,
-  business: shellBusiness = null, actor = null,
+  assist = null, business: shellBusiness = null, actor = null,
 } = {}) {
   const connected = status === "CONNECTED";
 
@@ -333,11 +394,11 @@ export function whatsappSettingsPage({
       ${!canManage
         ? `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>`
         : signup?.available
-          ? `<p class="hint" style="margin:0 0 12px">
-               <strong>What happens next:</strong> a Facebook window opens, because Meta owns WhatsApp and
-               only lets a business connect its number after logging in with Facebook. Log in, choose your
-               business and your WhatsApp number, and you're done. It takes about 2 minutes, once.
-               No Facebook account, or rather not? <a href="mailto:support@originutech.in">Contact us</a> and we'll connect it for you.
+          ? `<p class="choice-label">Option 1 · Do it yourself · about 2 minutes</p>
+             <p class="hint" style="margin:0 0 12px">
+               A Facebook window opens, because Meta owns WhatsApp and only lets a business connect its
+               number after logging in with Facebook. Log in, choose your business and your WhatsApp
+               number, and you're done.
              </p>
              <button type="button" id="connect-whatsapp" class="full">Connect WhatsApp with Facebook</button>
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
@@ -354,7 +415,8 @@ export function whatsappSettingsPage({
                contact support.
              </p>`}
       ${errorBlock(error)}
-    </div>`;
+    </div>
+    ${canManage ? assistCard({ assist, business, numbered: Boolean(signup?.available) }) : ""}`;
 
   // A stored-but-unproven or rejected connection. Says which, and what to
   // do about it, without showing anything technical.
