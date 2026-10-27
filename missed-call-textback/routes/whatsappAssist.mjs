@@ -3,8 +3,9 @@
  *
  * Meta only lets a number join the WhatsApp Business Platform through a
  * Facebook login, so an owner without one (or who'd rather not) asks us to
- * do that part. They give the WhatsApp number and a good time to call; we
- * do the Facebook side, and they only read out the code Meta texts them.
+ * do that part. They give the WhatsApp number, how they want help (WhatsApp
+ * chat or in person, never a phone call) and a good time; we
+ * do the Facebook side, and they only share the code Meta texts them.
  *
  * The request is saved on the business so the page shows it was received,
  * support is emailed when email is configured, and if a support WhatsApp
@@ -17,7 +18,7 @@ import { resolveActor, can } from "../lib/users.mjs";
 import { toE164 } from "../lib/phone.mjs";
 import { createMailer } from "../lib/mailer.mjs";
 import { log, logError } from "../lib/logger.mjs";
-import { ASSIST_TIMES as BEST_TIMES } from "../lib/settingsViews.mjs";
+import { ASSIST_TIMES as BEST_TIMES, ASSIST_METHODS } from "../lib/settingsViews.mjs";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
 const formOf = (ctx) => new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "");
@@ -28,13 +29,14 @@ export function supportWhatsAppDigits(config) {
   return e164 ? e164.replace(/\D/g, "") : "";
 }
 
-export function assistMessage({ businessName, ownerName, number, bestTime }) {
+export function assistMessage({ businessName, ownerName, number, bestTime, method = "whatsapp" }) {
   return [
     "Hi, please set up MissedCall WhatsApp for my business.",
     `Business: ${businessName || "-"}`,
     ownerName ? `Owner: ${ownerName}` : "",
     `WhatsApp number to connect: ${number}`,
-    `Best time to call: ${BEST_TIMES[bestTime] ?? BEST_TIMES.anytime}`,
+    `Help by: ${ASSIST_METHODS[method] ?? ASSIST_METHODS.whatsapp}`,
+    `Best time to reach me: ${BEST_TIMES[bestTime] ?? BEST_TIMES.anytime}`,
   ].filter(Boolean).join("\n");
 }
 
@@ -56,16 +58,18 @@ export async function handleWhatsappAssistPost(ctx, deps) {
   if (!number) return redirect("/settings/whatsapp?a=bad");
   const bestTime = BEST_TIMES[form.get("bestTime")] ? form.get("bestTime") : "anytime";
 
-  const setupRequest = { number, bestTime, requestedAt: new Date().toISOString() };
+  const method = ASSIST_METHODS[form.get("method")] ? form.get("method") : "whatsapp";
+
+  const setupRequest = { number, bestTime, method, requestedAt: new Date().toISOString() };
   try {
     await deps.store.saveBusiness({ ...business, setupRequest, updatedAt: setupRequest.requestedAt });
   } catch (err) {
     logError("whatsapp_assist_save_failed", err, { businessId: actor.businessId });
     return redirect("/settings/whatsapp?a=fail");
   }
-  log("whatsapp_setup_requested", { businessId: actor.businessId, bestTime });
+  log("whatsapp_setup_requested", { businessId: actor.businessId, bestTime, method });
 
-  const text = assistMessage({ businessName: business.name, ownerName: business.ownerName, number, bestTime });
+  const text = assistMessage({ businessName: business.name, ownerName: business.ownerName, number, bestTime, method });
 
   // Best effort: a missing or failing mailer must not lose the request,
   // which is already saved and also goes out over WhatsApp below.

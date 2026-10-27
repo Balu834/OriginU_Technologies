@@ -226,16 +226,23 @@ export const ASSIST_TIMES = {
   anytime: "Any time",
 };
 
+/** How the owner wants setup help. Never a phone call: WhatsApp chat, or a visit in Hyderabad. */
+export const ASSIST_METHODS = {
+  whatsapp: "WhatsApp chat",
+  visit: "In person (Hyderabad)",
+};
+
 const ASSIST_NOTICES = {
-  sent: { ok: true, text: "Request received. We'll call you at the time you picked to connect your WhatsApp." },
+  sent: { ok: true, text: "Request received. We'll message you on WhatsApp at the time you picked to connect your number." },
   bad: { ok: false, text: "That doesn't look like a phone number. Enter it with the country code, like +91 98765 43210." },
   fail: { ok: false, text: "We couldn't save your request. Please try again in a moment." },
 };
 
 /**
- * "No Facebook? We'll set it up for you." The owner gives the number and a
- * time to call; we do the Facebook part and they only read out the code
- * WhatsApp texts them. Shows the request once it has been made.
+ * "No Facebook? We'll set it up for you." The owner gives the number, how
+ * they want help (WhatsApp chat or in person, never a phone call) and a good
+ * time; we do the Facebook part and they only share the code WhatsApp texts
+ * them. Shows the request once it has been made.
  */
 function assistCard({ assist, business, numbered = false }) {
   const request = assist?.request ?? null;
@@ -247,6 +254,10 @@ function assistCard({ assist, business, numbered = false }) {
   const options = Object.entries(ASSIST_TIMES)
     .map(([value, label]) => `<option value="${value}"${request?.bestTime === value ? " selected" : ""}>${label}</option>`)
     .join("");
+  const method = ASSIST_METHODS[request?.method] ? request.method : "whatsapp";
+  const methodOptions = Object.entries(ASSIST_METHODS)
+    .map(([value, label]) => `<option value="${value}"${method === value ? " selected" : ""}>${label}</option>`)
+    .join("");
   const chat = assist?.supportDigits
     ? ` or <a href="https://wa.me/${escapeHtml(assist.supportDigits)}">message us on WhatsApp</a>`
     : "";
@@ -255,20 +266,23 @@ function assistCard({ assist, business, numbered = false }) {
     <div class="card assist-card">
       <p class="choice-label">${numbered ? "Option 2 · " : ""}No Facebook? We'll set it up for you</p>
       <p class="hint" style="margin:0 0 12px">
-        Tell us your WhatsApp number and when to call. We do the Facebook part for you. You only read
-        us the 6-digit code WhatsApp sends to your phone. It takes about 10 minutes, and we'll explain
-        what changes for the WhatsApp app on your phone before anything is switched over.
+        Tell us your WhatsApp number and how you'd like help. We do the Facebook part for you and guide
+        you step by step on WhatsApp chat, or in person if you're in Hyderabad. You only share the
+        6-digit code WhatsApp sends to your phone, and we'll explain what changes for the WhatsApp app
+        on your phone before anything is switched over.
       </p>
       ${notice ? `<p class="hint assist-note${notice.ok ? "" : " bad"}" role="status">${notice.ok ? "✓ " : "✕ "}${escapeHtml(notice.text)}</p>` : ""}
       ${request && !notice
         ? `<p class="hint assist-note" role="status">✓ Requested on ${escapeHtml(when)} for ${escapeHtml(request.number)}.
-             We'll call you: ${escapeHtml((ASSIST_TIMES[request.bestTime] ?? ASSIST_TIMES.anytime).toLowerCase())}.
+             ${method === "visit" ? "We'll message you on WhatsApp to fix a visit" : "We'll message you on WhatsApp"}: ${escapeHtml((ASSIST_TIMES[request.bestTime] ?? ASSIST_TIMES.anytime).toLowerCase())}.
              Nothing else to do${chat}.</p>`
         : ""}
       <form method="POST" action="/settings/whatsapp/assist">
         <label for="assist-number">WhatsApp number to connect</label>
         <input type="tel" id="assist-number" name="number" value="${escapeHtml(number)}" placeholder="+91 98765 43210" autocomplete="tel" required>
-        <label for="assist-time">Best time to call you</label>
+        <label for="assist-method">How would you like help?</label>
+        <select id="assist-method" name="method">${methodOptions}</select>
+        <label for="assist-time">Best time to reach you</label>
         <select id="assist-time" name="bestTime">${options}</select>
         <button type="submit" class="full ghost assist-btn">${request ? "Update my request" : "Set it up for me"}</button>
       </form>
