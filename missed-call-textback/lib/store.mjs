@@ -17,6 +17,7 @@ const EMPTY = () => ({
   conversations: {},
   processedMessages: {},
   processedMissedCalls: {},
+  ownerReplies: {},
   sessions: {},
   rateLimits: {},
   messages: {},
@@ -251,6 +252,16 @@ export function createStore(filePath) {
     },
     async markMissedCall(callerNumber, atMs) {
       data.processedMissedCalls[callerNumber] = atMs;
+      persist();
+    },
+
+    /** When the owner last messaged this customer from their own WhatsApp Business app (ms), or null. */
+    async lastOwnerReplyAt(customerNumber) {
+      return data.ownerReplies?.[customerNumber] ?? null;
+    },
+    async markOwnerReply(customerNumber, atMs) {
+      data.ownerReplies = data.ownerReplies ?? {};
+      data.ownerReplies[customerNumber] = atMs;
       persist();
     },
 
