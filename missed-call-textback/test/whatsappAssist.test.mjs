@@ -116,9 +116,35 @@ test("staff can't request setup and signed-out visitors are sent to sign in", as
   assert.equal(anon.headers.Location, "/leads");
 });
 
+test("help is offered by WhatsApp chat or in person, never by phone call", async () => {
+  const w = await buildWorld({ SUPPORT_WHATSAPP_NUMBER: "+91 90000 00001" });
+  const page = await handleWhatsappSettingsGet(await ctxFor(w, w.owner), w);
+  assert.ok(page.html.includes("How would you like help?"));
+  assert.ok(page.html.includes('<option value="whatsapp" selected>WhatsApp chat</option>'));
+  assert.ok(page.html.includes("In person (Hyderabad)"));
+  assert.doesNotMatch(page.html, /when to call|time to call|call you/i);
+
+  const res = await handleWhatsappAssistPost(await ctxFor(w, w.owner, { number: "+919876543210", bestTime: "evening", method: "visit" }), w);
+  assert.ok(new URL(res.headers.Location).searchParams.get("text").includes("Help by: In person (Hyderabad)"));
+  await reload(w);
+  assert.equal(w.businesses.byId("biz-a").setupRequest.method, "visit");
+  const after = await handleWhatsappSettingsGet(await ctxFor(w, w.owner), w);
+  assert.match(after.html, /message you on WhatsApp to fix a visit/);
+  assert.match(after.html, /<option value="visit" selected>/);
+});
+
+test("an unknown help method is stored as WhatsApp chat", async () => {
+  const w = await buildWorld();
+  await handleWhatsappAssistPost(await ctxFor(w, w.owner, { number: "+919876543210", method: "phone" }), w);
+  await reload(w);
+  assert.equal(w.businesses.byId("biz-a").setupRequest.method, "whatsapp");
+});
+
 test("support number and message helpers", () => {
   assert.equal(supportWhatsAppDigits({ SUPPORT_WHATSAPP_NUMBER: "" }), "");
   assert.equal(supportWhatsAppDigits({ SUPPORT_WHATSAPP_NUMBER: "nonsense" }), "");
   assert.equal(supportWhatsAppDigits({ SUPPORT_WHATSAPP_NUMBER: "9000000001" }), "919000000001");
   assert.match(assistMessage({ businessName: "X", number: "+919", bestTime: "nope" }), /Any time/);
+  assert.match(assistMessage({ businessName: "X", number: "+919", bestTime: "nope" }), /Help by: WhatsApp chat/);
+  assert.doesNotMatch(assistMessage({ businessName: "X", number: "+919" }), /\bcall\b/i);
 });
