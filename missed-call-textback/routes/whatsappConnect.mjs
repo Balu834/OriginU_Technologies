@@ -176,11 +176,31 @@ export async function handleWhatsappConnect(ctx, deps) {
   }
   if (!phoneNumberId || !wabaId) return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
 
+  // A number that stays on the owner's WhatsApp Business app ("coexistence")
+  // is already registered, and Meta says not to register it again. Meta's
+  // own answer decides; the browser's report is only the fallback.
+  const onApp = deps.embeddedSignup.isOnBusinessApp
+    ? await deps.embeddedSignup.isOnBusinessApp(phoneNumberId, accessToken)
+    : null;
+  const coexistence = onApp ?? body.coexistence === true;
+
   // Both best-effort, both reported. Neither can make a connection
   // CONNECTED and neither failing is allowed to discard a token the
   // customer just authorised — verification below is the judge.
-  const registered = await deps.embeddedSignup.registerNumber(phoneNumberId, accessToken);
+  const registered = coexistence
+    ? { ok: false, skipped: true, coexistence: true }
+    : await deps.embeddedSignup.registerNumber(phoneNumberId, accessToken);
   const subscribed = await deps.embeddedSignup.subscribeApp(wabaId, accessToken);
+
+  // Coexistence numbers must start the contacts and chat-history syncs
+  // within 24 hours of onboarding, or the owner has to do it all again.
+  // Started straight away, best-effort, and only ever once per connection.
+  let synced = null;
+  if (coexistence && deps.embeddedSignup.startAppSync) {
+    const contacts = await deps.embeddedSignup.startAppSync(phoneNumberId, accessToken, "smb_app_state_sync");
+    const history = await deps.embeddedSignup.startAppSync(phoneNumberId, accessToken, "history");
+    synced = { contacts: Boolean(contacts.ok), history: Boolean(history.ok) };
+  }
   const described = await deps.embeddedSignup.describeNumber(phoneNumberId, accessToken);
 
   let integration;
@@ -201,6 +221,7 @@ export async function handleWhatsappConnect(ctx, deps) {
       // Embedded Signup tokens expire (60 days); recorded so sends can
       // refresh ahead of it and the settings page can warn.
       tokenExpiresAt: expiryFromSeconds(exchanged.expiresIn),
+      coexistence,
     });
     log("integration_registered", { businessId: actor.businessId, via: "embedded_signup" });
   } catch (err) {
@@ -248,6 +269,8 @@ export async function handleWhatsappConnect(ctx, deps) {
     verified: result.ok,
     registered: registered.ok,
     registerSkipped: Boolean(registered.skipped),
+    coexistence,
+    synced,
     subscribed: subscribed.ok,
     template: template.skipped ? "skipped" : template.ok ? (template.existing ? "existing" : "submitted") : "failed",
   });

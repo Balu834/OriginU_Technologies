@@ -53,6 +53,8 @@ export function scopedToBusiness(store, businessId) {
     deleteConversation: (cid) => store.deleteConversation(cid, ns),
     lastMissedCallAt: (n) => store.lastMissedCallAt(ns + n),
     markMissedCall: (n, at) => store.markMissedCall(ns + n, at),
+    lastOwnerReplyAt: (n) => store.lastOwnerReplyAt(ns + n),
+    markOwnerReply: (n, at) => store.markOwnerReply(ns + n, at),
     // Sessions and rate limits are deployment-wide, not per-tenant.
     // Business records are deployment-wide, exposed unscoped.
     saveUser: store.saveUser?.bind(store),
@@ -372,6 +374,20 @@ export function createRedisStore(env = process.env) {
     },
     async markMissedCall(callerNumber, atMs) {
       await command("SET", `missedcall:${callerNumber}`, String(atMs), "EX", String(MISSED_CALL_TTL_SECONDS));
+    },
+
+    /**
+     * When the owner last messaged this customer from their own WhatsApp
+     * Business app (coexistence numbers only), or null. Kept as long as a
+     * missed call is, so "the owner already replied after this call" can
+     * always be answered.
+     */
+    async lastOwnerReplyAt(customerNumber) {
+      const raw = await command("GET", `ownerreply:${customerNumber}`);
+      return raw ? Number(raw) : null;
+    },
+    async markOwnerReply(customerNumber, atMs) {
+      await command("SET", `ownerreply:${customerNumber}`, String(atMs), "EX", String(MISSED_CALL_TTL_SECONDS));
     },
 
     async saveSession(id, session, ttlSeconds) {

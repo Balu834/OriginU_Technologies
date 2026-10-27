@@ -490,6 +490,51 @@ export function createEmbeddedSignupClient({
     },
 
     /**
+     * Whether this number is also on the WhatsApp Business app (coexistence).
+     * Meta reports `is_on_biz_app: true` for numbers onboarded through the
+     * Business-app flow. Null when Meta can't be asked, so the caller falls
+     * back to what the browser reported.
+     */
+    async isOnBusinessApp(phoneNumberId, accessToken) {
+      const id = String(phoneNumberId ?? "").trim();
+      if (!id) return null;
+      try {
+        const res = await call(`/${encodeURIComponent(id)}?fields=is_on_biz_app,platform_type`, { accessToken });
+        if (!res.ok) return null;
+        return res.body?.is_on_biz_app === true;
+      } catch {
+        return null;
+      }
+    },
+
+    /**
+     * Starts one of the two one-time syncs a coexistence number needs:
+     * "smb_app_state_sync" (contacts) or "history" (past chats). Meta only
+     * accepts these within 24 hours of onboarding, and each can run once;
+     * the answer only means "accepted", the data arrives later by webhook.
+     */
+    async startAppSync(phoneNumberId, accessToken, syncType) {
+      const id = String(phoneNumberId ?? "").trim();
+      if (!id || !["smb_app_state_sync", "history"].includes(syncType)) return { ok: false };
+      try {
+        const res = await call(`/${encodeURIComponent(id)}/smb_app_data`, {
+          method: "POST",
+          accessToken,
+          body: { messaging_product: "whatsapp", sync_type: syncType },
+        });
+        if (!res.ok) {
+          const meta = metaError(res.body);
+          log("coexistence_sync_failed", { syncType, metaCode: meta?.code ?? null, metaMessage: meta?.message ?? null });
+          return { ok: false, meta };
+        }
+        return { ok: true, requestId: String(res.body?.request_id ?? "") };
+      } catch (err) {
+        logError("embedded_signup_unreachable", err, { step: `sync:${syncType}` });
+        return { ok: false, reason: SIGNUP_FAILURES.NETWORK_ERROR };
+      }
+    },
+
+    /**
      * The number as Meta displays it, for the success screen.
      *
      * Cosmetic only — a failure costs a nicely formatted number, nothing

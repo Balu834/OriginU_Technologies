@@ -37,6 +37,7 @@ const STYLES = `
   .assist-card { margin-top:12px; }
   .assist-note { margin:0 0 10px; color:var(--accent); }
   .assist-note.bad { color:var(--urgent); }
+  button.ghost.connect-alt { margin-top:10px; min-height:40px; }
   button.ghost.assist-btn { margin-top:16px; min-height:44px; color:var(--accent); border-color:var(--accent); font-weight:600; }
   button { margin-top:18px; min-height:46px; padding:0 20px; font-size:15px; font-weight:600;
            border:0; border-radius:3px; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
@@ -411,10 +412,15 @@ export function whatsappSettingsPage({
           ? `<p class="choice-label">Option 1 · Do it yourself · about 2 minutes</p>
              <p class="hint" style="margin:0 0 12px">
                A Facebook window opens, because Meta owns WhatsApp and only lets a business connect its
-               number after logging in with Facebook. Log in, choose your business and your WhatsApp
-               number, and you're done.
+               number after logging in with Facebook.
              </p>
-             <button type="button" id="connect-whatsapp" class="full">Connect WhatsApp with Facebook</button>
+             <p class="hint" style="margin:0 0 8px"><strong>Already use the WhatsApp Business app on this number?</strong>
+               Keep it. Log in, then scan the QR code Meta shows using the WhatsApp Business app on your phone.
+               Your chats, contacts and number stay as they are, and MissedCall only replies to people who
+               gave you a missed call. Update the app first; regular WhatsApp (not Business) can't do this.
+             </p>
+             <button type="button" id="connect-whatsapp-app" class="full" data-mode="app">Keep my WhatsApp Business app (scan a QR code)</button>
+             <button type="button" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
              <p class="hint" id="connect-recover" hidden>
                <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
@@ -581,6 +587,12 @@ function embeddedSignupScript(signup) {
 (function () {
   var btn = document.getElementById("connect-whatsapp");
   if (!btn) return;
+  // Both connect buttons share one flow. "app" keeps the number on the
+  // owner's WhatsApp Business app (Meta coexistence); "api" moves it.
+  var buttons = [btn, document.getElementById("connect-whatsapp-app")].filter(Boolean);
+  var mode = "api";
+  var sawAppOnboarding = false;
+  function setDisabled(v) { buttons.forEach(function (b) { b.disabled = v; }); }
   var out = document.getElementById("connect-status");
   var recover = document.getElementById("connect-recover");
   var CFG = ${jsonForScript({ appId: signup.appId, configId: signup.configId, version: signup.graphVersion })};
@@ -590,7 +602,7 @@ function embeddedSignupScript(signup) {
   function say(msg) { if (out) { out.textContent = msg; out.hidden = false; } }
   function fail(msg) {
     busy = false;
-    btn.disabled = false;
+    setDisabled(false);
     say(msg);
     if (recover) recover.hidden = false;
   }
@@ -623,6 +635,7 @@ function embeddedSignupScript(signup) {
         phoneNumberId: (data.data && data.data.phone_number_id) || "",
         wabaId: (data.data && data.data.waba_id) || ""
       };
+      if (data.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") sawAppOnboarding = true;
     } else if (data.event === "CANCEL") {
       fail("WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
     }
@@ -657,7 +670,8 @@ function embeddedSignupScript(signup) {
         wabaId: (assets && assets.wabaId) || "",
         seen: seen,
         pageUrl: location.href.split("#")[0],
-        dialogRedirectUri: dialogRedirectUri
+        dialogRedirectUri: dialogRedirectUri,
+        coexistence: mode === "app" || sawAppOnboarding
       })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
@@ -692,15 +706,17 @@ function embeddedSignupScript(signup) {
     })();
   }
 
-  btn.addEventListener("click", function () {
+  function start(which) {
     if (busy) return;
     if (!window.FB) {
       fail("The Meta connection window couldn't load. Check your connection, then try again.");
       return;
     }
     busy = true;
-    btn.disabled = true;
+    setDisabled(true);
     assets = null;
+    mode = which === "app" ? "app" : "api";
+    sawAppOnboarding = false;
     // On a phone the Meta flow opens as a separate tab and ends on a page
     // that says "Please close this tab". Say so up front, or the owner is
     // left on that page wondering whether anything happened.
@@ -709,8 +725,11 @@ function embeddedSignupScript(signup) {
       config_id: CFG.configId,
       response_type: "code",
       override_default_response_type: true,
-      extras: { setup: {}, featureType: "", sessionInfoVersion: "3" }
+      extras: { setup: {}, featureType: mode === "app" ? "whatsapp_business_app_onboarding" : "", sessionInfoVersion: "3" }
     });
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener("click", function () { start(b.getAttribute("data-mode")); });
   });
 
   window.fbAsyncInit = function () {

@@ -6,6 +6,27 @@ import { handleInboundMessage } from "../lib/conversation.mjs";
 import { log, logError } from "../lib/logger.mjs";
 import { toE164 } from "../lib/phone.mjs";
 
+/**
+ * How long after a missed call MissedCall may answer that caller on a
+ * coexistence number (one the owner also uses in the WhatsApp Business app).
+ * Outside it, a message is an ordinary chat and belongs to the owner.
+ */
+export const COEXISTENCE_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Webhook fields that only coexistence numbers send, and that need no reply. */
+const COEXISTENCE_INFO_FIELDS = new Set(["history", "smb_app_state_sync"]);
+
+/**
+ * Whether the bot may answer this message on a coexistence number: only a
+ * caller who gave a missed call within the window, and only until the owner
+ * has replied to them from the app after that call.
+ */
+export function coexistenceMayReply({ lastMissedCallAt, lastOwnerReplyAt, now = Date.now() }) {
+  if (!lastMissedCallAt || now - lastMissedCallAt > COEXISTENCE_REPLY_WINDOW_MS) return { ok: false, reason: "no_recent_missed_call" };
+  if (lastOwnerReplyAt && lastOwnerReplyAt >= lastMissedCallAt) return { ok: false, reason: "owner_replied" };
+  return { ok: true };
+}
+
 /** GET /webhook — Meta's one-time verification handshake. */
 export function verifyWebhookGet(ctx, { config }) {
   const mode = ctx.query.get("hub.mode");
@@ -72,6 +93,17 @@ export function handleWebhookPost(ctx, deps) {
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
+        // Lifecycle news for a coexistence number (owner disconnected the
+        // app, number changed...). It carries no phone_number_id, so it is
+        // recorded here rather than dropped as "unknown business".
+        if (change.field === "account_update") {
+          log("account_update_received", {
+            event: String(change.value?.event ?? "").slice(0, 40),
+            reason: String(change.value?.disconnection_info?.reason ?? "").slice(0, 40) || null,
+          });
+          continue;
+        }
+
         // Attribute the delivery to a business before touching any data.
         // Meta tells us which of our numbers the customer messaged; if it
         // isn't one we know, the event is dropped rather than guessed at —
@@ -156,6 +188,29 @@ export function handleWebhookPost(ctx, deps) {
           }
         }
 
+        // Contact and chat-history syncs for a coexistence number. Nothing
+        // to answer and nothing to store: the owner's history stays theirs.
+        if (COEXISTENCE_INFO_FIELDS.has(change.field)) {
+          log("coexistence_sync_received", { field: change.field, businessId: business?.id ?? null });
+          continue;
+        }
+
+        // A message the owner sent from their own WhatsApp Business app. It
+        // is never a customer message; it means the owner has taken over
+        // that chat, so the bot steps back for that customer.
+        for (const echo of change.value?.message_echoes ?? []) {
+          try {
+            const to = String(echo?.to ?? "");
+            if (!to) continue;
+            const customer = to.startsWith("+") ? to : `+${to}`;
+            const at = Number(echo.timestamp) ? Number(echo.timestamp) * 1000 : Date.now();
+            if (tenantStore.markOwnerReply) await tenantStore.markOwnerReply(customer, at);
+            log("owner_replied_from_app", { businessId: business?.id ?? null });
+          } catch (err) {
+            logError("message_echo_error", err, {});
+          }
+        }
+
         for (const msg of change.value?.messages ?? []) {
           try {
             if (!msg.id) {
@@ -182,6 +237,21 @@ export function handleWebhookPost(ctx, deps) {
             if (business?.ownerWhatsApp && from === (toE164(business.ownerWhatsApp) ?? business.ownerWhatsApp)) {
               log("owner_message_ignored", { businessId: business.id });
               continue;
+            }
+
+            // On a number the owner also uses in the WhatsApp Business app,
+            // most messages are ordinary chats with the owner. Only someone
+            // who just gave a missed call is MissedCall's to answer, and only
+            // until the owner replies to them from the app.
+            if (integration?.coexistence) {
+              const decision = coexistenceMayReply({
+                lastMissedCallAt: tenantStore.lastMissedCallAt ? await tenantStore.lastMissedCallAt(from) : null,
+                lastOwnerReplyAt: tenantStore.lastOwnerReplyAt ? await tenantStore.lastOwnerReplyAt(from) : null,
+              });
+              if (!decision.ok) {
+                log("coexistence_message_left_to_owner", { businessId: business?.id, reason: decision.reason });
+                continue;
+              }
             }
 
             log("customer_reply_received", { from, businessId: business?.id });
