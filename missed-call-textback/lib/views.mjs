@@ -32,23 +32,23 @@ export function escapeHtml(value) {
 export const TOKENS = `
   :root {
     color-scheme: light dark;
-    --bg:#f4f1ea; --card:#fffdf8; --ink:#16130f; --muted:#6b6255;
-    --line:#e2dbcd; --accent:#a8500c; --accent-ink:#fff;
-    --urgent:#a81c1c; --urgent-ink:#fff; --urgent-wash:#fdf0ee;
-    --shadow:0 1px 2px rgba(22,19,15,.05), 0 8px 24px -12px rgba(22,19,15,.18);
-    --display:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --bg:#f6f4ef; --card:#fffdf9; --ink:#14110e; --muted:#6a6258;
+    --line:#e5dfd4; --accent:#0f8a5f; --accent-ink:#fff;
+    --urgent:#c0392b; --urgent-ink:#fff; --urgent-wash:#fdf2f0;
+    --shadow:0 1px 2px rgba(20,17,14,.05), 0 10px 28px -14px rgba(20,17,14,.18);
+    --display:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:#12100d; --card:#1c1914; --ink:#f4efe4; --muted:#9c9384;
-      --line:#2f2a22; --accent:#e08b2e; --accent-ink:#1a1409;
-      --urgent:#f0756a; --urgent-ink:#2a1108; --urgent-wash:#2a1714;
-      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+      --bg:#100f0c; --card:#1a1814; --ink:#f3efe6; --muted:#9a9286;
+      --line:#2c2820; --accent:#2fc98a; --accent-ink:#06150e;
+      --urgent:#e74c3c; --urgent-ink:#2a100c; --urgent-wash:#2a1614;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.6);
     }
   }
-`;
+`;`;
 
 const STYLES = `
   * { box-sizing:border-box; }
@@ -59,24 +59,24 @@ const STYLES = `
     background-image:radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 55%);
     background-repeat:no-repeat;
   }
-  .wrap { max-width:640px; margin:0 auto; padding:24px 18px 64px; }
+  .wrap { max-width:680px; margin:0 auto; padding:22px 16px 72px; }
 
   /* ---- masthead ---- */
   .masthead { display:flex; align-items:flex-end; justify-content:space-between; gap:16px;
-              padding-bottom:14px; margin-bottom:26px; border-bottom:2px solid var(--ink); }
-  .masthead h1 { font-family:var(--display); font-size:30px; line-height:1; margin:0;
-                 letter-spacing:-.02em; font-weight:600; }
-  .tally { font-family:var(--mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase;
-           color:var(--muted); margin-top:7px; }
+              padding-bottom:16px; margin-bottom:22px; border-bottom:2px solid var(--ink); }
+  .masthead h1 { font-family:var(--display); font-size:28px; line-height:1.05; margin:0;
+                 letter-spacing:-.03em; font-weight:700; }
+  .tally { font-family:var(--mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase;
+           color:var(--muted); margin-top:8px; }
   .tally b { color:var(--accent); font-weight:700; }
 
   /* ---- lead card ---- */
   .lead { position:relative; background:var(--card); border:1px solid var(--line);
-          border-radius:4px; padding:18px 18px 16px 22px; margin-bottom:14px;
+          border-radius:12px; padding:18px 18px 16px 20px; margin-bottom:12px;
           box-shadow:var(--shadow); overflow:hidden;
-          animation:rise .5s cubic-bezier(.2,.7,.3,1) both; }
-  .lead::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--accent); }
-  .lead.urgent { border-color:color-mix(in srgb, var(--urgent) 45%, var(--line)); background:var(--urgent-wash); }
+          animation:rise .45s cubic-bezier(.2,.7,.3,1) both; }
+  .lead::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--accent); border-radius:12px 0 0 12px; }
+  .lead.urgent { border-color:color-mix(in srgb, var(--urgent) 40%, var(--line)); background:var(--urgent-wash); }
   .lead.urgent::before { background:var(--urgent); }
   .lead:nth-child(1){animation-delay:.02s} .lead:nth-child(2){animation-delay:.06s}
   .lead:nth-child(3){animation-delay:.1s}  .lead:nth-child(4){animation-delay:.14s}
