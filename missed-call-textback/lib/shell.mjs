@@ -23,9 +23,9 @@ import { escapeHtml } from "./views.mjs";
 export const SHELL_STYLES = `
   :root {
     color-scheme: light dark;
-    --bg:#f7f9f8; --card:#ffffff; --ink:#111816; --muted:#5c6b64;
-    --line:#e4eae7; --wash:#f1f8f4;
-    --accent:#12855a; --accent-ink:#ffffff; --accent-soft:#e7f4ed;
+    --bg:#f7faf8; --card:#ffffff; --ink:#0f1714; --muted:#5a6b63;
+    --line:#e1eae5; --wash:#eef6f1;
+    --accent:#0f8a5f; --accent-ink:#ffffff; --accent-soft:#e3f5ec;
     --urgent:#b3261e; --urgent-soft:#fdecea;
     --shadow-sm:0 1px 2px rgba(17,24,22,.05);
     --shadow:0 1px 3px rgba(17,24,22,.06), 0 10px 28px -18px rgba(17,24,22,.25);
@@ -37,9 +37,9 @@ export const SHELL_STYLES = `
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:#0d100f; --card:#141917; --ink:#eef3f0; --muted:#94a39b;
-      --line:#222b27; --wash:#121b16; --accent:#35c78a; --accent-ink:#06120c;
-      --accent-soft:#11251b; --urgent:#f2877f; --urgent-soft:#2a1512;
+      --bg:#0b100e; --card:#131a17; --ink:#eef4f0; --muted:#8fa39a;
+      --line:#1f2a25; --wash:#101815; --accent:#2fc98a; --accent-ink:#04150e;
+      --accent-soft:#12281e; --urgent:#f2877f; --urgent-soft:#2a1512;
       --urgent-ink:#2a1512; --urgent-wash:#2a1512;
       --shadow-sm:0 1px 2px rgba(0,0,0,.4);
       --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.7);
