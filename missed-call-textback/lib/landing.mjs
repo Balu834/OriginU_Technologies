@@ -38,7 +38,7 @@ const STYLES = `
     color-scheme: light dark;
     --bg:#f7faf8; --card:#ffffff; --ink:#0f1714; --muted:#5a6b63;
     --line:#e1eae5; --wash:#eef6f1;
-    --accent:#0f8a5f; --accent-ink:#ffffff; --accent-soft:#e3f5ec;
+    --accent:#0c7f57; --accent-ink:#ffffff; --accent-soft:#e3f5ec;
     --accent-deep:#0a6b49;
     --shadow-sm:0 1px 2px rgba(15,23,20,.05);
     --shadow:0 1px 3px rgba(15,23,20,.06), 0 16px 40px -18px rgba(15,23,20,.22);
@@ -323,7 +323,7 @@ const STYLES = `
   .foot a { color:var(--muted); text-decoration:none; font-size:14px; }
   .foot a:hover { color:var(--accent); }
   .fine { color:var(--muted); font-size:13px; margin-top:28px; }
-`;`;
+`;
 
 /** A tiny inline icon set, so the page needs no image requests or icon font. */
 const icon = {

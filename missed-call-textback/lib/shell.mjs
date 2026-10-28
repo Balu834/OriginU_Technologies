@@ -25,7 +25,7 @@ export const SHELL_STYLES = `
     color-scheme: light dark;
     --bg:#f7faf8; --card:#ffffff; --ink:#0f1714; --muted:#5a6b63;
     --line:#e1eae5; --wash:#eef6f1;
-    --accent:#0f8a5f; --accent-ink:#ffffff; --accent-soft:#e3f5ec;
+    --accent:#0c7f57; --accent-ink:#ffffff; --accent-soft:#e3f5ec;
     --urgent:#b3261e; --urgent-soft:#fdecea;
     --shadow-sm:0 1px 2px rgba(17,24,22,.05);
     --shadow:0 1px 3px rgba(17,24,22,.06), 0 10px 28px -18px rgba(17,24,22,.25);

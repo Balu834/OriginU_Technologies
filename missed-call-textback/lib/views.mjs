@@ -33,7 +33,7 @@ export const TOKENS = `
   :root {
     color-scheme: light dark;
     --bg:#f6f4ef; --card:#fffdf9; --ink:#14110e; --muted:#6a6258;
-    --line:#e5dfd4; --accent:#0f8a5f; --accent-ink:#fff;
+    --line:#e5dfd4; --accent:#0c7f57; --accent-ink:#fff;
     --urgent:#c0392b; --urgent-ink:#fff; --urgent-wash:#fdf2f0;
     --shadow:0 1px 2px rgba(20,17,14,.05), 0 10px 28px -14px rgba(20,17,14,.18);
     --display:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -48,7 +48,7 @@ export const TOKENS = `
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -14px rgba(0,0,0,.6);
     }
   }
-`;`;
+`;
 
 const STYLES = `
   * { box-sizing:border-box; }
