@@ -34,11 +34,19 @@ const STYLES = `
   input:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
   .hint { font-size:12.5px; color:var(--muted); margin:5px 0 0; }
   .choice-label { font-weight:600; font-size:15px; margin:0 0 6px; }
-  .assist-card { margin-top:12px; }
+  .assist-card { margin-top:0; border:2px solid var(--accent); }
+  .badge { display:inline-block; font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.12em;
+           text-transform:uppercase; padding:3px 8px; border-radius:2px; background:var(--accent); color:var(--accent-ink);
+           margin-bottom:8px; }
+  details.diy > summary { cursor:pointer; font-weight:600; font-size:15px; list-style:none; }
+  details.diy > summary::-webkit-details-marker { display:none; }
+  details.diy > summary::before { content:"+ "; color:var(--accent); }
+  details.diy[open] > summary::before { content:"− "; }
+  details.diy[open] > summary { margin-bottom:10px; }
   .assist-note { margin:0 0 10px; color:var(--accent); }
   .assist-note.bad { color:var(--urgent); }
   button.ghost.connect-alt { margin-top:10px; min-height:40px; }
-  button.ghost.assist-btn { margin-top:16px; min-height:44px; color:var(--accent); border-color:var(--accent); font-weight:600; }
+  button.assist-btn { margin-top:16px; }
   button { margin-top:18px; min-height:46px; padding:0 20px; font-size:15px; font-weight:600;
            border:0; border-radius:3px; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
   button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); min-height:34px;
@@ -240,12 +248,12 @@ const ASSIST_NOTICES = {
 };
 
 /**
- * "No Facebook? We'll set it up for you." The owner gives the number, how
- * they want help (WhatsApp chat or in person, never a phone call) and a good
- * time; we do the Facebook part and they only share the code WhatsApp texts
- * them. Shows the request once it has been made.
+ * "We'll set it up for you." The first and recommended way to connect: the
+ * owner gives the number, how they want help (WhatsApp chat or in person,
+ * never a phone call) and a good time; we do the Facebook part and they only
+ * share the code WhatsApp texts them. Shows the request once it has been made.
  */
-function assistCard({ assist, business, numbered = false }) {
+function assistCard({ assist, business }) {
   const request = assist?.request ?? null;
   const notice = ASSIST_NOTICES[assist?.notice] ?? null;
   const when = request?.requestedAt
@@ -264,13 +272,14 @@ function assistCard({ assist, business, numbered = false }) {
     : "";
 
   return `
-    <div class="card assist-card">
-      <p class="choice-label">${numbered ? "Option 2 · " : ""}No Facebook? We'll set it up for you</p>
+    <div class="card assist-card" id="assist">
+      <span class="badge">Easiest · free</span>
+      <p class="choice-label">We'll set it up for you</p>
       <p class="hint" style="margin:0 0 12px">
-        Tell us your WhatsApp number and how you'd like help. We do the Facebook part for you and guide
-        you step by step on WhatsApp chat, or in person if you're in Hyderabad. You only share the
-        6-digit code WhatsApp sends to your phone, and we'll explain what changes for the WhatsApp app
-        on your phone before anything is switched over.
+        No Facebook or Meta steps for you. Enter your WhatsApp number and we do the setup, guiding
+        you on WhatsApp chat, or in person if you're in Hyderabad. All you do is share the 6-digit
+        code WhatsApp sends to your phone, and we explain anything that changes on your phone before
+        we switch it on.
       </p>
       ${notice ? `<p class="hint assist-note${notice.ok ? "" : " bad"}" role="status">${notice.ok ? "✓ " : "✕ "}${escapeHtml(notice.text)}</p>` : ""}
       ${request && !notice
@@ -285,7 +294,7 @@ function assistCard({ assist, business, numbered = false }) {
         <select id="assist-method" name="method">${methodOptions}</select>
         <label for="assist-time">Best time to reach you</label>
         <select id="assist-time" name="bestTime">${options}</select>
-        <button type="submit" class="full ghost assist-btn">${request ? "Update my request" : "Set it up for me"}</button>
+        <button type="submit" class="full assist-btn">${request ? "Update my request" : "Set it up for me"}</button>
       </form>
     </div>`;
 }
@@ -349,9 +358,10 @@ export function whatsappSettingsPage({
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--urgent)">
          <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">WhatsApp connection wasn't completed.</h2>
          <p class="hint" style="margin:0 0 12px">${escapeHtml(failure)}</p>
+         <p class="hint" style="margin:0 0 12px">Easiest fix: let us set it up for you. It's free and needs no Facebook steps.</p>
          <div class="actions">
-           <a class="btn-link" href="/settings/whatsapp">Try again</a>
-           <a class="btn-link ghost" href="#advanced">Advanced setup</a>
+           <a class="btn-link" href="#assist">Set it up for me</a>
+           <a class="btn-link ghost" href="/settings/whatsapp">Try again</a>
          </div>
        </div>`
     : "";
@@ -397,20 +407,25 @@ export function whatsappSettingsPage({
         : `<p class="hint" style="margin-top:14px">Your role (${escapeHtml(role || "STAFF")}) can view this connection but not change it.</p>`}
     </div>`;
 
-  // Not connected. One button, no jargon, and an honest explanation when
-  // the button genuinely cannot work yet.
+  // Not connected. "We'll set it up for you" comes first; the Meta login
+  // flow is folded away under "Do it yourself" for owners who want it, with
+  // an honest explanation when that button genuinely cannot work yet.
   const connectCard = `
     <div class="card">
       <h2 style="font-family:var(--display);font-size:20px;margin:0 0 4px">Connect your WhatsApp Business account</h2>
-      <p class="hint" style="margin:0 0 16px">
+      <p class="hint" style="margin:0">
         Automatically follow up with customers when you miss their calls and capture
         new leads through WhatsApp.
       </p>
-      ${!canManage
-        ? `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>`
-        : signup?.available
-          ? `<p class="choice-label">Option 1 · Do it yourself · about 2 minutes</p>
-             <p class="hint" style="margin:0 0 12px">
+      ${!canManage ? `<p class="hint" style="margin:12px 0 0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>` : ""}
+    </div>
+    ${canManage ? assistCard({ assist, business }) : ""}
+    ${canManage
+      ? `<div class="card">
+      <details class="diy" id="diy"${error ? " open" : ""}>
+      <summary>Do it yourself with Facebook · about 2 minutes</summary>
+      ${signup?.available
+          ? `<p class="hint" style="margin:0 0 12px">
                A Facebook window opens, because Meta owns WhatsApp and only lets a business connect its
                number after logging in with Facebook.
              </p>
@@ -423,7 +438,7 @@ export function whatsappSettingsPage({
              <button type="button" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
              <p class="hint" id="connect-recover" hidden>
-               <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
+               <a href="#assist">Let us set it up for you</a> · <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
              </p>
              <p class="hint">Securely connect your WhatsApp Business account through Meta.</p>
              <noscript>
@@ -435,8 +450,9 @@ export function whatsappSettingsPage({
                contact support.
              </p>`}
       ${errorBlock(error)}
-    </div>
-    ${canManage ? assistCard({ assist, business, numbered: Boolean(signup?.available) }) : ""}`;
+      </details>
+    </div>`
+      : ""}`;
 
   // A stored-but-unproven or rejected connection. Says which, and what to
   // do about it, without showing anything technical.

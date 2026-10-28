@@ -48,7 +48,8 @@ test("the WhatsApp page offers both ways to connect", async () => {
   const w = await buildWorld();
   const res = await handleWhatsappSettingsGet(await ctxFor(w, w.owner), w);
   assert.equal(res.status, 200);
-  assert.match(res.html, /No Facebook\? We'll set it up for you/);
+  assert.match(res.html, /We'll set it up for you/);
+  assert.ok(res.html.indexOf('id="assist"') < res.html.indexOf('id="diy"'), "set-it-up-for-you comes before do-it-yourself");
   assert.match(res.html, /action="\/settings\/whatsapp\/assist"/);
   assert.match(res.html, /value="\+919111111111"/, "the business phone is filled in");
 });
