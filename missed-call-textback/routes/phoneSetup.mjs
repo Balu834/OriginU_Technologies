@@ -45,7 +45,9 @@ function view(business, deps, actor, extra = {}) {
     envManaged: isEnvManaged(business, deps.config),
     canManage: can(actor.role, "manageSettings"),
     role: actor.role,
-    baseUrl: deps.config?.WEBHOOK_BASE_URL ?? "",
+    // The address owners type into MissedCall on their phone: the public
+    // domain when one is set, so nobody copies an old *.vercel.app URL.
+    baseUrl: deps.config?.PUBLIC_BASE_URL || deps.config?.WEBHOOK_BASE_URL || "",
     actor,
     ...extra,
   });

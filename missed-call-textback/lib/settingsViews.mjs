@@ -1187,6 +1187,31 @@ export function settingsNav(current = "") {
 }
 
 /**
+ * A read-only value with a Copy button, for the settings an owner must type
+ * into MacroDroid exactly. Selecting the box on tap still works without JS.
+ */
+function copyField(id, value) {
+  return `<span class="copyrow" style="display:flex;gap:8px;margin:4px 0 10px">
+      <input id="${escapeHtml(id)}" readonly value="${escapeHtml(value)}" onclick="this.select()" style="font-family:monospace;font-size:14px;flex:1;min-width:0">
+      <button type="button" class="ghost copy-btn" data-copy="${escapeHtml(id)}" style="margin:0;min-height:44px">Copy</button>
+    </span>`;
+}
+
+const COPY_SCRIPT = `<script>
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest && e.target.closest(".copy-btn");
+  if (!btn) return;
+  var input = document.getElementById(btn.getAttribute("data-copy"));
+  if (!input) return;
+  input.select();
+  var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(done, function () { document.execCommand("copy"); done(); });
+  } else { document.execCommand("copy"); done(); }
+});
+</script>`;
+
+/**
  * /settings/phone — the key a business's phone uses to report missed calls,
  * and how to set the phone up.
  *
@@ -1206,6 +1231,8 @@ export function phoneSetupPage({
          <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Your new key</h2>
          <p class="hint" style="margin:0 0 10px">Copy it now. It is shown only this once. If you lose it, create a new one and update the phone.</p>
          <input id="new-key" readonly value="${escapeHtml(newKey)}" onclick="this.select()" style="font-family:monospace">
+         <p class="hint" style="margin:12px 0 4px">For MacroDroid's <code>Authorization</code> header, copy this whole line (it already has "Bearer " in front):</p>
+         ${copyField("new-key-header", `Bearer ${newKey}`)}
        </div>`
     : "";
 
@@ -1238,13 +1265,14 @@ export function phoneSetupPage({
         <li>Install <strong>MacroDroid</strong> from the Play Store and open it.</li>
         <li>Tap <strong>Add Macro</strong>.</li>
         <li><strong>Trigger:</strong> Call/SMS → <strong>Call Missed</strong> → Any Number.</li>
-        <li><strong>Action:</strong> Web Interactions → <strong>HTTP Request</strong>, then set:
-          <ul style="margin:6px 0 6px;padding-left:18px">
-            <li>Method: <strong>POST</strong></li>
-            <li>URL: <code>${escapeHtml(endpoint)}</code></li>
-            <li>Header <code>Authorization</code>: <code>Bearer YOUR-KEY</code> (the word Bearer, a space, then your key)</li>
-            <li>Content type: <code>application/json</code></li>
-            <li>Body: <code>{"callerNumber":"[call_number]"}</code></li>
+        <li><strong>Action:</strong> Web Interactions → <strong>HTTP Request</strong>, then set these. Tap <strong>Copy</strong> and paste each one; typing them by hand is where most setups go wrong.
+          <ul style="margin:6px 0 6px;padding-left:18px;list-style:none">
+            <li>Method: <strong>POST</strong>. Not GET: MacroDroid starts on GET, so change it.</li>
+            <li>URL (ends at <code>/missed-call</code>, nothing after it):${copyField("copy-url", endpoint)}</li>
+            <li>Header name:${copyField("copy-header-name", "Authorization")}</li>
+            <li>Header value: <code>Bearer YOUR-KEY</code>, the word Bearer, a space, then your key. When you create a key above, the page shows this whole line ready to copy.</li>
+            <li>Content type:${copyField("copy-content-type", "application/json")}</li>
+            <li>Body:${copyField("copy-body", '{"callerNumber":"[call_number]"}')}</li>
           </ul>
         </li>
         <li>Name the macro "MissedCall" and save it.</li>
@@ -1279,6 +1307,6 @@ export function phoneSetupPage({
     ${keyCard}
     ${guide}
     ${ivrGuide}
-    ${settingsNav("/settings/phone")}`, "",
+    ${settingsNav("/settings/phone")}`, COPY_SCRIPT,
     { active: "/settings/phone", business, actor });
 }
