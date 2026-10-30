@@ -31,10 +31,14 @@ const TIMEOUT_MS = 10000;
  * than by removing the unsafe ones.
  */
 export function razorpayConfig(env = process.env) {
+  // Trimmed because values piped into `vercel env add` keep their trailing
+  // newline. An untrimmed plan id made Razorpay answer 404 for a plan that
+  // exists, and an untrimmed webhook secret would fail every signature.
+  const read = (name) => (env[name] ?? "").trim();
   return {
-    keyId: env.RAZORPAY_KEY_ID ?? "",
-    keySecret: env.RAZORPAY_KEY_SECRET ?? "",
-    webhookSecret: env.RAZORPAY_WEBHOOK_SECRET ?? "",
+    keyId: read("RAZORPAY_KEY_ID"),
+    keySecret: read("RAZORPAY_KEY_SECRET"),
+    webhookSecret: read("RAZORPAY_WEBHOOK_SECRET"),
     // One Razorpay plan id per plan we actually sell. Server-side only:
     // the browser never names a plan id, so it cannot subscribe itself to
     // a cheaper plan than the one it asked for.
@@ -44,7 +48,7 @@ export function razorpayConfig(env = process.env) {
     // at — and a variable that exists invites someone to fill it with a
     // plan nobody has priced.
     planIds: {
-      PRO: env.RAZORPAY_PLAN_ID_PRO ?? "",
+      PRO: read("RAZORPAY_PLAN_ID_PRO"),
     },
   };
 }
