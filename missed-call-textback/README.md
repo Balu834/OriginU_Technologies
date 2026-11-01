@@ -331,6 +331,30 @@ power outage. On a hit, the system:
 - Marks the lead urgent and notifies Mohamed immediately, even if the lead
   is otherwise incomplete — safety over lead qualification.
 
+## Referral links (marketers)
+
+Each marketer gets a code and shares `https://missedcall.originutech.in/?ref=<code>`
+(or `/signup?ref=<code>`). Opening the link remembers the code for 30 days
+(first link wins); the business created at onboarding is stamped with it.
+Codes are 2–32 letters, digits, `_` or `-`, case-insensitive.
+
+Payout rules (`REFERRAL_RULES` in `lib/referrals.mjs`):
+
+- **Rs 100 per verified connect**: the business connected its WhatsApp and
+  got its first real lead within 14 days. Counted in the month it was verified.
+- **Rs 200 once** when a referred business starts paying.
+- **Monthly bonus** on verified connects: 50 -> Rs 1,000, 150 -> Rs 2,500,
+  300 -> Rs 5,000 (highest step reached only).
+
+Month by month, per marketer (India time):
+
+```
+node scripts/referral-report.mjs --month 2026-11 --detail
+```
+
+It reads the production database (KV_REST_API_URL / KV_REST_API_TOKEN) and
+changes nothing. Code: `lib/referrals.mjs`.
+
 ## Storage
 
 A single JSON file (`data/db.json`, gitignored) holds leads, conversation

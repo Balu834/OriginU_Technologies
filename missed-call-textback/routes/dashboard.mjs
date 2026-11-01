@@ -1,4 +1,5 @@
 import { currentSession, createSession, verifyPassword, sessionCookie, clearedCookie, parseCookies, loginRateLimited, COOKIE_NAME } from "../lib/auth.mjs";
+import { referralCookieFor, withCookie } from "../lib/referrals.mjs";
 import { loginPage, dashboardPage, leadDetailPage } from "../lib/views.mjs";
 import { googleSignInAvailable } from "../lib/googleAuth.mjs";
 import { isValidStatus, isValidPriority, canTransition, formatOwnerNotification } from "../lib/leads.mjs";
@@ -20,7 +21,7 @@ import { log } from "../lib/logger.mjs";
  * than written into the page, so the pitch cannot end up advertising a
  * price or an allowance the product no longer offers.
  */
-export function handleLanding() {
+export function handleLanding(ctx) {
   const plans = Object.fromEntries(
     ["FREE", "PRO"].map((name) => [name, {
       price: formatPrice(name),
@@ -32,7 +33,8 @@ export function handleLanding() {
   // visitor sees, not a tenant's own dashboard, and BUSINESS_NAME is the
   // legacy single-tenant config — passing it here printed one customer's
   // name in the footer of the public homepage.
-  return { status: 200, html: landingPage({ plans }) };
+  // A marketer's ?ref= link remembers their code until onboarding.
+  return withCookie({ status: 200, html: landingPage({ plans }) }, referralCookieFor(ctx));
 }
 
 /** GET /leads — the leads dashboard, or the login form when there's no valid session. */
