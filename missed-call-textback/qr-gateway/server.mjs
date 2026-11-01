@@ -159,6 +159,13 @@ async function main() {
     version = undefined; // Baileys falls back to its bundled version
   }
 
+  // Only the small start-up syncs. Baileys gets the contact-id (LID) to
+  // phone-number mappings from them, and turning every sync off makes
+  // sessions unstable. Full and recent chat history stay off; the gateway
+  // never listens to history events, so none of it is forwarded or stored.
+  const HistoryType = proto.HistorySync.HistorySyncType;
+  const allowedSyncs = new Set([HistoryType.INITIAL_BOOTSTRAP, HistoryType.PUSH_NAME, HistoryType.NON_BLOCKING_DATA]);
+
   const instanceId = env.FLY_MACHINE_ID || os.hostname();
   const redis = createRedis({ url: env.KV_REST_API_URL, token: env.KV_REST_API_TOKEN });
 
@@ -181,10 +188,10 @@ async function main() {
         browser: Browsers.ubuntu("Chrome"),
         printQRInTerminal: false,
         markOnlineOnConnect: false,
-        // No chat history: we only need new messages, and pulling the
-        // owner's whole history would mean holding their private chats.
+        // No full or recent chat history: only new messages matter, and
+        // pulling the owner's history would mean holding their private chats.
         syncFullHistory: false,
-        shouldSyncHistoryMessage: () => false,
+        shouldSyncHistoryMessage: ({ syncType }) => allowedSyncs.has(syncType),
         generateHighQualityLinkPreview: false,
         getMessage: async () => undefined,
       }),
