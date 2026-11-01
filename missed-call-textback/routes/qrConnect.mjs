@@ -12,7 +12,7 @@
  */
 import { currentSession } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
-import { QR_PROVIDER, qrConnectConfig, QR_STATE_MESSAGES } from "../lib/qrGateway.mjs";
+import { QR_PROVIDER, qrOfferedTo, actorEmail, QR_STATE_MESSAGES } from "../lib/qrGateway.mjs";
 import { qrPendingKey, qrErrorKey, QR_PENDING_TTL_SECONDS } from "./qrEvents.mjs";
 import { toE164 } from "../lib/phone.mjs";
 import { log } from "../lib/logger.mjs";
@@ -41,10 +41,10 @@ export async function handleQrStart(ctx, deps) {
   const integration = await deps.integrations.forBusiness(actor.businessId);
   const alreadyQr = integration?.provider === QR_PROVIDER;
 
-  // A brand-new link is only offered while the flag is on. Reconnecting a
-  // business already on QR keeps working with the flag off.
-  const qr = qrConnectConfig(deps.config ?? {});
-  if (!deps.qrGateway || (!qr.available && !alreadyQr)) return back("off");
+  // A brand-new link only for an allow-listed business while the flag is
+  // on. Reconnecting a business already on QR keeps working regardless.
+  const offered = qrOfferedTo(deps.config ?? {}, { businessId: actor.businessId, email: await actorEmail(actor, deps.store) });
+  if (!deps.qrGateway || (!offered && !alreadyQr)) return back("off");
 
   // A business already on the official route keeps it. Switching to the
   // unofficial one is a step down that should never happen by a stray form.

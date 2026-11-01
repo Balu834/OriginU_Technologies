@@ -18,7 +18,7 @@ import {
 } from "../lib/settingsViews.mjs";
 import { log, logError } from "../lib/logger.mjs";
 import { toE164 } from "../lib/phone.mjs";
-import { qrConnectConfig, QR_FAILURE_MESSAGES } from "../lib/qrGateway.mjs";
+import { qrOfferedTo, actorEmail, QR_FAILURE_MESSAGES } from "../lib/qrGateway.mjs";
 import crypto from "node:crypto";
 
 const redirect = (to) => ({ status: 302, headers: { Location: to }, body: {} });
@@ -185,10 +185,13 @@ async function whatsappSettingsHtml(ctx, deps, actor, { error } = {}) {
     role: actor.role,
     actor,
     error,
-    // The unofficial QR-code option: offered only with the flag on and a
-    // gateway wired. `q` is one of a fixed set of markers.
+    // The unofficial QR-code option: offered only with the flag on, a
+    // gateway wired, and this business on the allow-list. `q` is one of a
+    // fixed set of markers.
     qr: {
-      available: qrConnectConfig(deps.config ?? {}).available && Boolean(deps.qrGateway),
+      available: Boolean(deps.qrGateway) && qrOfferedTo(deps.config ?? {}, {
+        businessId: actor.businessId, email: await actorEmail(actor, deps.store),
+      }),
       notice: ctx.query?.get("q") ?? null,
       polling: ctx.query?.get("q") === "started",
     },

@@ -27,12 +27,40 @@ export const QR_PROVIDER = "whatsapp_qr";
 /** How long after a missed call the bot will answer that person on the owner's number. */
 export const QR_REPLY_WINDOW_MS = 48 * 60 * 60 * 1000;
 
-/** Whether QR can be offered here, and whether existing QR businesses can still run. */
+/**
+ * Whether QR can be offered here, and whether existing QR businesses can
+ * still run. `available` means "switched on and wired"; who actually sees
+ * it is decided per business by qrOfferedTo().
+ */
 export function qrConnectConfig(config = {}) {
   const url = String(config.QR_GATEWAY_URL ?? "").replace(/\/$/, "");
   const secret = String(config.QR_GATEWAY_SECRET ?? "");
   const wired = Boolean(/^https?:\/\//.test(url) && secret.length >= 32 && isValidEncryptionKey(config.INTEGRATION_ENCRYPTION_KEY));
   return { wired, available: Boolean(config.QR_CONNECT_ENABLED) && wired, url, secret };
+}
+
+/**
+ * Whether THIS business may be offered the QR option.
+ *
+ * Offered case by case: QR_CONNECT_ALLOWLIST is a comma-separated list of
+ * business ids and/or the sign-in emails of people allowed to see it. An
+ * empty list offers it to nobody, so switching the flag on alone can never
+ * show it to every customer. "*" offers it to all.
+ */
+export function qrOfferedTo(config = {}, { businessId = "", email = "" } = {}) {
+  if (!qrConnectConfig(config).available || !businessId) return false;
+  const entries = String(config.QR_CONNECT_ALLOWLIST ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const mail = String(email ?? "").trim().toLowerCase();
+  return entries.includes("*") || entries.includes(String(businessId).toLowerCase()) || Boolean(mail && entries.includes(mail));
+}
+
+/** The signed-in person's email, for the allow-list. Null for legacy sessions. */
+export async function actorEmail(actor, store) {
+  if (!actor?.user?.id || !store?.getUser) return null;
+  return (await store.getUser(actor.user.id))?.email ?? null;
 }
 
 /** A gateway client, or null when this deployment has no gateway. */

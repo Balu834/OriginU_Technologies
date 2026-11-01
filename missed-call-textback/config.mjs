@@ -95,6 +95,9 @@ export function loadConfig(env = process.env, dir = here) {
     // already connected this way keep working while the gateway URL and
     // secret are set, so switching the flag off can't strand them mid-chat.
     QR_CONNECT_ENABLED: merged.QR_CONNECT_ENABLED === "1" || merged.QR_CONNECT_ENABLED === "true",
+    // Who sees the option: comma-separated business ids and/or sign-in
+    // emails, or "*" for everyone. Empty = nobody, even with the flag on.
+    QR_CONNECT_ALLOWLIST: merged.QR_CONNECT_ALLOWLIST ?? "",
     // The always-on gateway (Fly.io), e.g. https://missedcall-qr-gateway.fly.dev
     QR_GATEWAY_URL: merged.QR_GATEWAY_URL ?? "",
     // Shared HMAC secret, at least 32 characters, same value on the gateway.

@@ -16,7 +16,7 @@ import { loadBusinessRegistry, businessRecord } from "../lib/businesses.mjs";
 import { createSession, COOKIE_NAME } from "../lib/auth.mjs";
 import { clientForBusiness, ownerAlertClientForBusiness } from "../lib/outbound.mjs";
 import {
-  qrConnectConfig, createQrWhatsAppClient, renderTemplateText, qrShouldReply, QR_REPLY_WINDOW_MS,
+  qrConnectConfig, qrOfferedTo, createQrWhatsAppClient, renderTemplateText, qrShouldReply, QR_REPLY_WINDOW_MS,
 } from "../lib/qrGateway.mjs";
 import { signQrRequest, QR_SIGNATURE_HEADER } from "../lib/qrSigning.mjs";
 import { handleQrEvent, qrPendingKey, qrErrorKey } from "../routes/qrEvents.mjs";
@@ -63,6 +63,7 @@ async function world({ enabled = true, official = true } = {}) {
   const config = {
     INTEGRATION_ENCRYPTION_KEY: "c".repeat(64),
     QR_CONNECT_ENABLED: enabled,
+    QR_CONNECT_ALLOWLIST: "qbiz",
     QR_GATEWAY_URL: "https://gateway.example",
     QR_GATEWAY_SECRET: SECRET,
     META_ACCESS_TOKEN: official ? "official-token" : "",
@@ -136,6 +137,39 @@ test("QR is offered only with the flag on and a gateway, key and long secret set
   assert.equal(qrConnectConfig({ ...base, QR_CONNECT_ENABLED: true }).available, true);
   assert.equal(qrConnectConfig({ ...base, QR_CONNECT_ENABLED: true, QR_GATEWAY_SECRET: "short" }).available, false);
   assert.equal(qrConnectConfig({ ...base, QR_CONNECT_ENABLED: true, INTEGRATION_ENCRYPTION_KEY: "" }).available, false);
+});
+
+test("only allow-listed businesses are offered QR, even with the flag on", () => {
+  const on = {
+    INTEGRATION_ENCRYPTION_KEY: "c".repeat(64), QR_GATEWAY_URL: "https://g.example",
+    QR_GATEWAY_SECRET: SECRET, QR_CONNECT_ENABLED: true,
+  };
+  const biz = { businessId: "qbiz", email: "Tester@Example.test" };
+  assert.equal(qrOfferedTo(on, biz), false, "empty list offers it to nobody");
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ALLOWLIST: "a, qbiz ,b" }, biz), true, "by business id");
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ALLOWLIST: "tester@example.test" }, biz), true, "by email, any case");
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ALLOWLIST: "a,b@example.test" }, biz), false);
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ALLOWLIST: "*" }, { businessId: "anyone" }), true);
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ENABLED: false, QR_CONNECT_ALLOWLIST: "*" }, biz), false, "flag off wins");
+  assert.equal(qrOfferedTo({ ...on, QR_CONNECT_ALLOWLIST: "*" }, { businessId: "" }), false);
+});
+
+test("listing someone's sign-in email offers it to their business", async () => {
+  const w = await world();
+  w.config.QR_CONNECT_ALLOWLIST = "QR-OTHER@example.test";
+  const session = await sessionFor(w, w.other);
+  const page = await handleWhatsappSettingsGet(getCtx("/settings/whatsapp", session), w);
+  assert.match(page.html, /Connect by scanning a QR code/);
+});
+
+test("a business not on the list sees no QR option and cannot start one", async () => {
+  const w = await world();
+  const session = await sessionFor(w, w.other);
+  const page = await handleWhatsappSettingsGet(getCtx("/settings/whatsapp", session), w);
+  assert.doesNotMatch(page.html, /QR code/);
+  const res = await handleQrStart(formCtx("/settings/whatsapp/qr/start", session, { ack: "yes" }), w);
+  assert.match(res.headers.Location, /q=off/);
+  assert.equal(w.qrGateway.calls.length, 0);
 });
 
 // ---------------------------------------------------------------- client

@@ -168,6 +168,9 @@ service in [`qr-gateway/`](qr-gateway/README.md) running on Fly.io (Singapore; F
   shows these risks first and the owner must tick a box to accept them; who
   ticked and when is stored on the connection.
 - **Never call it official or Meta-approved.** Only the Facebook route is.
+- Offered case by case: only to people or businesses listed in
+  `QR_CONNECT_ALLOWLIST` (comma-separated sign-in emails and/or business
+  ids, `*` for all; empty = none).
 - Hidden unless `QR_CONNECT_ENABLED=1` and `QR_GATEWAY_URL` /
   `QR_GATEWAY_SECRET` are set. With the flag off, businesses already linked
   keep working; nobody new can start.

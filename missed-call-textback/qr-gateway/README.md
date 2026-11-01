@@ -66,7 +66,8 @@ capped per number per hour (`QR_MAX_SENDS_PER_HOUR`, default 60).
 | `BAILEYS_LOG_LEVEL` | Optional, default `warn` (lower levels log message contents) |
 
 On the app (Vercel): `QR_GATEWAY_URL=https://<app>.fly.dev`, the same
-`QR_GATEWAY_SECRET`, and `QR_CONNECT_ENABLED=1` only when you want the option
+`QR_GATEWAY_SECRET`, `QR_CONNECT_ALLOWLIST` (the sign-in emails or business ids
+allowed to see it), and `QR_CONNECT_ENABLED=1` only when you want the option
 shown. Also make sure the `new_lead_alert` template is approved in MissedCall's
 own WABA, since QR businesses' owner alerts go from that number.
 
