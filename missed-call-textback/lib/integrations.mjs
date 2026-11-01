@@ -33,6 +33,10 @@ export function createIntegration({
   verifyToken = "",
   status = "CONFIGURED",
   tokenExpiresAt = null,
+  // True when the number stays on the owner's WhatsApp Business app too
+  // (Meta "coexistence"). The bot then only answers missed callers and
+  // steps back once the owner replies from the app — see routes/webhook.mjs.
+  coexistence = false,
   encryptionKey,
 }) {
   const now = new Date().toISOString();
@@ -51,6 +55,7 @@ export function createIntegration({
     // expire (manually pasted system-user tokens). Embedded Signup tokens
     // last 60 days and are refreshed ahead of this — see tokenNeedsRefresh.
     tokenExpiresAt: tokenExpiresAt ?? null,
+    coexistence: Boolean(coexistence),
     createdAt: now,
     updatedAt: now,
     lastVerifiedAt: null,
@@ -110,6 +115,7 @@ export function publicView(integration) {
     // public key that even mentions a token.
     connectionExpiresAt: integration.tokenExpiresAt ?? null,
     template: integration.template ?? null,
+    coexistence: Boolean(integration.coexistence),
   };
 }
 

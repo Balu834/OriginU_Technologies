@@ -35,12 +35,13 @@ import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
 import { handleForgotGet, handleForgotPost, handleResetGet, handleResetPost } from "./passwordReset.mjs";
 import { handleGoogleStart, handleGoogleCallback } from "./googleAuth.mjs";
 import { handleQrStart, handleQrStatus, handleQrLogout } from "./qrConnect.mjs";
+import { handleWhatsappAssistPost } from "./whatsappAssist.mjs";
 
 /** Paths whose bodies are form-encoded or signature-verified, never JSON. */
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
-  "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/phone/key",
+  "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/whatsapp/assist", "/settings/phone/key",
   "/settings/whatsapp/qr/start", "/settings/whatsapp/qr/logout",
   "/forgot-password", "/reset-password", "/ivr/missed-call",
 ]);
@@ -82,6 +83,7 @@ const ROUTES = [
   ["POST", "/settings/whatsapp/qr/start", handleQrStart],
   ["GET", "/settings/whatsapp/qr/status", handleQrStatus],
   ["POST", "/settings/whatsapp/qr/logout", handleQrLogout],
+  ["POST", "/settings/whatsapp/assist", handleWhatsappAssistPost],
   ["GET", "/settings/phone", handlePhoneSetupGet],
   ["POST", "/settings/phone/key", handlePhoneKeyPost],
   ["GET", "/settings/billing", handleBillingGet],

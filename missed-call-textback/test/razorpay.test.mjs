@@ -19,7 +19,7 @@ import { createBillingService, PLAN_ENTITLEMENTS } from "../lib/billing.mjs";
 import { createUsageService } from "../lib/usage.mjs";
 import {
   verifyWebhookSignature, mapSubscriptionStatus, createRazorpayClient,
-  publicConfig, isHandledEvent, HANDLED_EVENTS, isoFromUnix,
+  publicConfig, isHandledEvent, HANDLED_EVENTS, isoFromUnix, razorpayConfig, planIdFor,
 } from "../lib/razorpay.mjs";
 import { loadBusinessRegistry, businessRecord } from "../lib/businesses.mjs";
 import { createSession, COOKIE_NAME, hashPassword } from "../lib/auth.mjs";
@@ -653,4 +653,18 @@ test("checkout proceeds when the provider's price matches, and returns display i
 
   // Still FREE until a webhook says otherwise.
   assert.equal((await w.billing.getBusinessEntitlements(w.bizA.id)).plan, "FREE");
+});
+
+test("config trims the trailing newline that piped env values carry", () => {
+  const config = razorpayConfig({
+    RAZORPAY_KEY_ID: `${KEY_ID}\n`,
+    RAZORPAY_KEY_SECRET: `${KEY_SECRET}\n`,
+    RAZORPAY_WEBHOOK_SECRET: ` ${WEBHOOK_SECRET}\r\n`,
+    RAZORPAY_PLAN_ID_PRO: `${PRO_PLAN_ID}\n`,
+  });
+  assert.equal(config.keyId, KEY_ID);
+  assert.equal(config.keySecret, KEY_SECRET);
+  assert.equal(config.webhookSecret, WEBHOOK_SECRET);
+  assert.equal(planIdFor(config, "PRO"), PRO_PLAN_ID);
+  assert.equal(razorpayConfig({}).keyId, "");
 });

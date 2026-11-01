@@ -33,6 +33,20 @@ const STYLES = `
                   border-radius:3px; background:var(--bg); color:var(--ink); font-family:var(--sans); }
   input:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
   .hint { font-size:12.5px; color:var(--muted); margin:5px 0 0; }
+  .choice-label { font-weight:600; font-size:15px; margin:0 0 6px; }
+  .assist-card { margin-top:0; border:2px solid var(--accent); }
+  .badge { display:inline-block; font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.12em;
+           text-transform:uppercase; padding:3px 8px; border-radius:2px; background:var(--accent); color:var(--accent-ink);
+           margin-bottom:8px; }
+  details.diy > summary { cursor:pointer; font-weight:600; font-size:15px; list-style:none; }
+  details.diy > summary::-webkit-details-marker { display:none; }
+  details.diy > summary::before { content:"+ "; color:var(--accent); }
+  details.diy[open] > summary::before { content:"− "; }
+  details.diy[open] > summary { margin-bottom:10px; }
+  .assist-note { margin:0 0 10px; color:var(--accent); }
+  .assist-note.bad { color:var(--urgent); }
+  button.ghost.connect-alt { margin-top:10px; min-height:40px; }
+  button.assist-btn { margin-top:16px; }
   button { margin-top:18px; min-height:46px; padding:0 20px; font-size:15px; font-weight:600;
            border:0; border-radius:3px; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
   button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); min-height:34px;
@@ -225,10 +239,81 @@ export function onboardingPage({ error, values = {} } = {}) {
  * 2. Invent a status. Everything shown comes from the persisted
  *    integration record handed in by the route.
  */
+export const ASSIST_TIMES = {
+  morning: "Morning (9 AM to 12 PM)",
+  afternoon: "Afternoon (12 PM to 4 PM)",
+  evening: "Evening (4 PM to 8 PM)",
+  anytime: "Any time",
+};
+
+/** How the owner wants setup help. Never a phone call: WhatsApp chat, or a visit in Hyderabad. */
+export const ASSIST_METHODS = {
+  whatsapp: "WhatsApp chat",
+  visit: "In person (Hyderabad)",
+};
+
+const ASSIST_NOTICES = {
+  sent: { ok: true, text: "Request received. We'll message you on WhatsApp at the time you picked to connect your number." },
+  bad: { ok: false, text: "That doesn't look like a phone number. Enter it with the country code, like +91 98765 43210." },
+  fail: { ok: false, text: "We couldn't save your request. Please try again in a moment." },
+};
+
+/**
+ * "We'll set it up for you." The first and recommended way to connect: the
+ * owner gives the number, how they want help (WhatsApp chat or in person,
+ * never a phone call) and a good time; we do the Facebook part and they only
+ * share the code WhatsApp texts them. Shows the request once it has been made.
+ */
+function assistCard({ assist, business }) {
+  const request = assist?.request ?? null;
+  const notice = ASSIST_NOTICES[assist?.notice] ?? null;
+  const when = request?.requestedAt
+    ? new Date(request.requestedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+    : "";
+  const number = request?.number || business?.businessPhone || "";
+  const options = Object.entries(ASSIST_TIMES)
+    .map(([value, label]) => `<option value="${value}"${request?.bestTime === value ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const method = ASSIST_METHODS[request?.method] ? request.method : "whatsapp";
+  const methodOptions = Object.entries(ASSIST_METHODS)
+    .map(([value, label]) => `<option value="${value}"${method === value ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const chat = assist?.supportDigits
+    ? ` or <a href="https://wa.me/${escapeHtml(assist.supportDigits)}">message us on WhatsApp</a>`
+    : "";
+
+  return `
+    <div class="card assist-card" id="assist">
+      <span class="badge">Easiest · free</span>
+      <p class="choice-label">We'll set it up for you</p>
+      <p class="hint" style="margin:0 0 12px">
+        No Facebook or Meta steps for you. Enter your WhatsApp number and we do the setup, guiding
+        you on WhatsApp chat, or in person if you're in Hyderabad. All you do is share the 6-digit
+        code WhatsApp sends to your phone, and we explain anything that changes on your phone before
+        we switch it on.
+      </p>
+      ${notice ? `<p class="hint assist-note${notice.ok ? "" : " bad"}" role="status">${notice.ok ? "✓ " : "✕ "}${escapeHtml(notice.text)}</p>` : ""}
+      ${request && !notice
+        ? `<p class="hint assist-note" role="status">✓ Requested on ${escapeHtml(when)} for ${escapeHtml(request.number)}.
+             ${method === "visit" ? "We'll message you on WhatsApp to fix a visit" : "We'll message you on WhatsApp"}: ${escapeHtml((ASSIST_TIMES[request.bestTime] ?? ASSIST_TIMES.anytime).toLowerCase())}.
+             Nothing else to do${chat}.</p>`
+        : ""}
+      <form method="POST" action="/settings/whatsapp/assist">
+        <label for="assist-number">WhatsApp number to connect</label>
+        <input type="tel" id="assist-number" name="number" value="${escapeHtml(number)}" placeholder="+91 98765 43210" autocomplete="tel" required>
+        <label for="assist-method">How would you like help?</label>
+        <select id="assist-method" name="method">${methodOptions}</select>
+        <label for="assist-time">Best time to reach you</label>
+        <select id="assist-time" name="bestTime">${options}</select>
+        <button type="submit" class="full assist-btn">${request ? "Update my request" : "Set it up for me"}</button>
+      </form>
+    </div>`;
+}
+
 export function whatsappSettingsPage({
   business, integration, status = "NOT_CONNECTED", onboarding, canManage = false, role = "",
   error, verification = null, failure = null, signup = null, templates = null, testMessage = null,
-  business: shellBusiness = null, actor = null, qr = null,
+  assist = null, business: shellBusiness = null, actor = null, qr = null,
 } = {}) {
   const connected = status === "CONNECTED";
   // The unofficial QR-code route (lib/qrGateway.mjs) has its own cards.
@@ -287,9 +372,10 @@ export function whatsappSettingsPage({
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--urgent)">
          <h2 style="font-family:var(--display);font-size:18px;margin:0 0 4px">WhatsApp connection wasn't completed.</h2>
          <p class="hint" style="margin:0 0 12px">${escapeHtml(failure)}</p>
+         <p class="hint" style="margin:0 0 12px">Easiest fix: let us set it up for you. It's free and needs no Facebook steps.</p>
          <div class="actions">
-           <a class="btn-link" href="/settings/whatsapp">Try again</a>
-           <a class="btn-link ghost" href="#advanced">Advanced setup</a>
+           <a class="btn-link" href="#assist">Set it up for me</a>
+           <a class="btn-link ghost" href="/settings/whatsapp">Try again</a>
          </div>
        </div>`
     : "";
@@ -337,28 +423,38 @@ export function whatsappSettingsPage({
 
   const shownSuccess = isQr ? qrParts.success : success;
 
-  // Not connected. One button, no jargon, and an honest explanation when
-  // the button genuinely cannot work yet.
+  // Not connected. "We'll set it up for you" comes first; the Meta login
+  // flow is folded away under "Do it yourself" for owners who want it, with
+  // an honest explanation when that button genuinely cannot work yet.
   const connectCard = `
     <div class="card">
       <h2 style="font-family:var(--display);font-size:20px;margin:0 0 4px">Connect your WhatsApp Business account</h2>
-      <p class="hint" style="margin:0 0 16px">
+      <p class="hint" style="margin:0">
         Automatically follow up with customers when you miss their calls and capture
         new leads through WhatsApp.
       </p>
-      ${!canManage
-        ? `<p class="hint" style="margin:0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>`
-        : signup?.available
+      ${!canManage ? `<p class="hint" style="margin:12px 0 0">Your role (${escapeHtml(role || "STAFF")}) can view this but not connect WhatsApp.</p>` : ""}
+    </div>
+    ${canManage ? assistCard({ assist, business }) : ""}
+    ${canManage
+      ? `<div class="card">
+      <details class="diy" id="diy"${error ? " open" : ""}>
+      <summary>Do it yourself with Facebook · about 2 minutes</summary>
+      ${signup?.available
           ? `<p class="hint" style="margin:0 0 12px">
-               <strong>What happens next:</strong> a Facebook window opens, because Meta owns WhatsApp and
-               only lets a business connect its number after logging in with Facebook. Log in, choose your
-               business and your WhatsApp number, and you're done. It takes about 2 minutes, once.
-               No Facebook account, or rather not? <a href="mailto:support@originutech.in">Contact us</a> and we'll connect it for you.
+               A Facebook window opens, because Meta owns WhatsApp and only lets a business connect its
+               number after logging in with Facebook.
              </p>
-             <button type="button" id="connect-whatsapp" class="full">Connect WhatsApp with Facebook</button>
+             <p class="hint" style="margin:0 0 8px"><strong>Already use the WhatsApp Business app on this number?</strong>
+               Keep it. Log in, then scan the QR code Meta shows using the WhatsApp Business app on your phone.
+               Your chats, contacts and number stay as they are, and MissedCall only replies to people who
+               gave you a missed call. Update the app first; regular WhatsApp (not Business) can't do this.
+             </p>
+             <button type="button" id="connect-whatsapp-app" class="full" data-mode="app">Keep my WhatsApp Business app (scan a QR code)</button>
+             <button type="button" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
              <p class="hint" id="connect-recover" hidden>
-               <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
+               <a href="#assist">Let us set it up for you</a> · <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
              </p>
              <p class="hint">Securely connect your WhatsApp Business account through Meta.</p>
              <noscript>
@@ -370,7 +466,9 @@ export function whatsappSettingsPage({
                contact support.
              </p>`}
       ${errorBlock(error)}
-    </div>`;
+      </details>
+    </div>`
+      : ""}`;
 
   // A stored-but-unproven or rejected connection. Says which, and what to
   // do about it, without showing anything technical.
@@ -707,6 +805,12 @@ function embeddedSignupScript(signup) {
 (function () {
   var btn = document.getElementById("connect-whatsapp");
   if (!btn) return;
+  // Both connect buttons share one flow. "app" keeps the number on the
+  // owner's WhatsApp Business app (Meta coexistence); "api" moves it.
+  var buttons = [btn, document.getElementById("connect-whatsapp-app")].filter(Boolean);
+  var mode = "api";
+  var sawAppOnboarding = false;
+  function setDisabled(v) { buttons.forEach(function (b) { b.disabled = v; }); }
   var out = document.getElementById("connect-status");
   var recover = document.getElementById("connect-recover");
   var CFG = ${jsonForScript({ appId: signup.appId, configId: signup.configId, version: signup.graphVersion })};
@@ -716,7 +820,7 @@ function embeddedSignupScript(signup) {
   function say(msg) { if (out) { out.textContent = msg; out.hidden = false; } }
   function fail(msg) {
     busy = false;
-    btn.disabled = false;
+    setDisabled(false);
     say(msg);
     if (recover) recover.hidden = false;
   }
@@ -749,6 +853,7 @@ function embeddedSignupScript(signup) {
         phoneNumberId: (data.data && data.data.phone_number_id) || "",
         wabaId: (data.data && data.data.waba_id) || ""
       };
+      if (data.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") sawAppOnboarding = true;
     } else if (data.event === "CANCEL") {
       fail("WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
     }
@@ -783,7 +888,8 @@ function embeddedSignupScript(signup) {
         wabaId: (assets && assets.wabaId) || "",
         seen: seen,
         pageUrl: location.href.split("#")[0],
-        dialogRedirectUri: dialogRedirectUri
+        dialogRedirectUri: dialogRedirectUri,
+        coexistence: mode === "app" || sawAppOnboarding
       })
     })
       .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
@@ -818,15 +924,17 @@ function embeddedSignupScript(signup) {
     })();
   }
 
-  btn.addEventListener("click", function () {
+  function start(which) {
     if (busy) return;
     if (!window.FB) {
       fail("The Meta connection window couldn't load. Check your connection, then try again.");
       return;
     }
     busy = true;
-    btn.disabled = true;
+    setDisabled(true);
     assets = null;
+    mode = which === "app" ? "app" : "api";
+    sawAppOnboarding = false;
     // On a phone the Meta flow opens as a separate tab and ends on a page
     // that says "Please close this tab". Say so up front, or the owner is
     // left on that page wondering whether anything happened.
@@ -835,8 +943,11 @@ function embeddedSignupScript(signup) {
       config_id: CFG.configId,
       response_type: "code",
       override_default_response_type: true,
-      extras: { setup: {}, featureType: "", sessionInfoVersion: "3" }
+      extras: { setup: {}, featureType: mode === "app" ? "whatsapp_business_app_onboarding" : "", sessionInfoVersion: "3" }
     });
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener("click", function () { start(b.getAttribute("data-mode")); });
   });
 
   window.fbAsyncInit = function () {
@@ -1278,6 +1389,31 @@ export function settingsNav(current = "") {
 }
 
 /**
+ * A read-only value with a Copy button, for the settings an owner must type
+ * into MacroDroid exactly. Selecting the box on tap still works without JS.
+ */
+function copyField(id, value) {
+  return `<span class="copyrow" style="display:flex;gap:8px;margin:4px 0 10px">
+      <input id="${escapeHtml(id)}" readonly value="${escapeHtml(value)}" onclick="this.select()" style="font-family:monospace;font-size:14px;flex:1;min-width:0">
+      <button type="button" class="ghost copy-btn" data-copy="${escapeHtml(id)}" style="margin:0;min-height:44px">Copy</button>
+    </span>`;
+}
+
+const COPY_SCRIPT = `<script>
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest && e.target.closest(".copy-btn");
+  if (!btn) return;
+  var input = document.getElementById(btn.getAttribute("data-copy"));
+  if (!input) return;
+  input.select();
+  var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(done, function () { document.execCommand("copy"); done(); });
+  } else { document.execCommand("copy"); done(); }
+});
+</script>`;
+
+/**
  * /settings/phone — the key a business's phone uses to report missed calls,
  * and how to set the phone up.
  *
@@ -1297,6 +1433,8 @@ export function phoneSetupPage({
          <h2 style="font-family:var(--display);font-size:19px;margin:0 0 4px">Your new key</h2>
          <p class="hint" style="margin:0 0 10px">Copy it now. It is shown only this once. If you lose it, create a new one and update the phone.</p>
          <input id="new-key" readonly value="${escapeHtml(newKey)}" onclick="this.select()" style="font-family:monospace">
+         <p class="hint" style="margin:12px 0 4px">For MacroDroid's <code>Authorization</code> header, copy this whole line (it already has "Bearer " in front):</p>
+         ${copyField("new-key-header", `Bearer ${newKey}`)}
        </div>`
     : "";
 
@@ -1329,13 +1467,14 @@ export function phoneSetupPage({
         <li>Install <strong>MacroDroid</strong> from the Play Store and open it.</li>
         <li>Tap <strong>Add Macro</strong>.</li>
         <li><strong>Trigger:</strong> Call/SMS → <strong>Call Missed</strong> → Any Number.</li>
-        <li><strong>Action:</strong> Web Interactions → <strong>HTTP Request</strong>, then set:
-          <ul style="margin:6px 0 6px;padding-left:18px">
-            <li>Method: <strong>POST</strong></li>
-            <li>URL: <code>${escapeHtml(endpoint)}</code></li>
-            <li>Header <code>Authorization</code>: <code>Bearer YOUR-KEY</code> (the word Bearer, a space, then your key)</li>
-            <li>Content type: <code>application/json</code></li>
-            <li>Body: <code>{"callerNumber":"[call_number]"}</code></li>
+        <li><strong>Action:</strong> Web Interactions → <strong>HTTP Request</strong>, then set these. Tap <strong>Copy</strong> and paste each one; typing them by hand is where most setups go wrong.
+          <ul style="margin:6px 0 6px;padding-left:18px;list-style:none">
+            <li>Method: <strong>POST</strong>. Not GET: MacroDroid starts on GET, so change it.</li>
+            <li>URL (ends at <code>/missed-call</code>, nothing after it):${copyField("copy-url", endpoint)}</li>
+            <li>Header name:${copyField("copy-header-name", "Authorization")}</li>
+            <li>Header value: <code>Bearer YOUR-KEY</code>, the word Bearer, a space, then your key. When you create a key above, the page shows this whole line ready to copy.</li>
+            <li>Content type:${copyField("copy-content-type", "application/json")}</li>
+            <li>Body:${copyField("copy-body", '{"callerNumber":"[call_number]"}')}</li>
           </ul>
         </li>
         <li>Name the macro "MissedCall" and save it.</li>
@@ -1370,6 +1509,6 @@ export function phoneSetupPage({
     ${keyCard}
     ${guide}
     ${ivrGuide}
-    ${settingsNav("/settings/phone")}`, "",
+    ${settingsNav("/settings/phone")}`, COPY_SCRIPT,
     { active: "/settings/phone", business, actor });
 }

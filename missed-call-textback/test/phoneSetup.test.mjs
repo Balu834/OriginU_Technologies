@@ -89,9 +89,22 @@ test("creating a key shows it once, stores it, and never shows it again", async 
   await reload(w);
   assert.equal(w.businesses.byId("ph-a").missedCallApiKey, key, "the key survives a reload");
 
+  assert.match(String(created.html), new RegExp(`id="new-key-header"[^>]*value="Bearer ${key}"`), "the header line is ready to copy");
+
   const again = await handlePhoneSetupGet(ctx("GET", "/settings/phone", session), w);
   assert.equal(String(again.html).includes(key), false, "the key is never rendered a second time");
   assert.match(String(again.html), /A key is active/);
+});
+
+test("the guide uses the public domain and gives every MacroDroid value a copy box", async () => {
+  const w = await buildWorld();
+  w.config = { ...w.config, PUBLIC_BASE_URL: "https://missedcall.example.in/" };
+  const html = String((await handlePhoneSetupGet(ctx("GET", "/settings/phone", await sessionFor(w, w.ownerA)), w)).html);
+
+  assert.match(html, /id="copy-url"[^>]*value="https:\/\/missedcall\.example\.in\/missed-call"/);
+  assert.doesNotMatch(html, /https:\/\/example\.com\/missed-call/, "the webhook host is not shown when a public domain exists");
+  assert.match(html, /id="copy-body"[^>]*value="\{&quot;callerNumber&quot;:&quot;\[call_number\]&quot;\}"/);
+  assert.match(html, /Not GET/);
 });
 
 test("the key authenticates /missed-call for that business and sends on its name", async () => {

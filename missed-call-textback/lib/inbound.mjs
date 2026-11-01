@@ -14,9 +14,11 @@ import { toE164 } from "./phone.mjs";
 
 /**
  * `msg` is { id, type, from, text, timestamp }, `from` in E.164.
- * Returns what happened, for logs and tests.
+ * `mayReply(from)`, when given, can decline a message after the duplicate
+ * and owner checks (it is still marked processed). Returns what happened,
+ * for logs and tests.
  */
-export async function processInboundMessage(msg, { business, tenantStore, tenantWa, alertWa = null, tenantConfig, deps }) {
+export async function processInboundMessage(msg, { business, tenantStore, tenantWa, alertWa = null, tenantConfig, deps, mayReply = null }) {
   if (!msg.id) {
     log("message_missing_id", { type: msg.type });
   } else {
@@ -42,6 +44,10 @@ export async function processInboundMessage(msg, { business, tenantStore, tenant
     log("owner_message_ignored", { businessId: business.id });
     return { skipped: "owner" };
   }
+
+  // A route-specific "is this ours to answer?" rule (the webhook's Meta
+  // coexistence rule). It logs its own reason when it says no.
+  if (mayReply && !(await mayReply(from))) return { skipped: "not_ours" };
 
   log("customer_reply_received", { from, businessId: business?.id });
 
