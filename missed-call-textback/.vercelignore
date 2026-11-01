@@ -1,0 +1,9 @@
+# Same as .gitignore, plus the QR gateway, which runs on Fly.io, not Vercel.
+.env
+.env*.local
+node_modules/
+logs/
+data/
+.vercel
+qr-gateway/
+.dockerignore

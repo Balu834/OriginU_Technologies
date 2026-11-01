@@ -15,6 +15,7 @@ import { embeddedSignupConfig, createEmbeddedSignupClient } from "../lib/embedde
 import { createBillingService } from "../lib/billing.mjs";
 import { createUsageService } from "../lib/usage.mjs";
 import { razorpayConfig, createRazorpayClient } from "../lib/razorpay.mjs";
+import { qrGatewayFromConfig } from "../lib/qrGateway.mjs";
 import templates from "../templates.json" with { type: "json" };
 
 let cached = null;
@@ -67,6 +68,8 @@ export async function getRequestDeps() {
     usage: createUsageService(base.store),
     razorpay: razorpayConfig(process.env),
     razorpayClient: createRazorpayClient(razorpayConfig(process.env)),
+    // The unofficial QR-code route's gateway, or null when not deployed.
+    qrGateway: qrGatewayFromConfig(base.config),
   };
 }
 

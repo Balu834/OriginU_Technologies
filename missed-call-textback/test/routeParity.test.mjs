@@ -46,6 +46,7 @@ test("every browser rewrite points at the shared app function", () => {
     "/missed-call": "/api/missed-call",
     "/ivr/missed-call": "/api/ivr-missed-call",
     "/webhook": "/api/webhook",
+    "/qr/events": "/api/qr-events",
     "/razorpay-webhook": "/api/razorpay-webhook",
   };
 

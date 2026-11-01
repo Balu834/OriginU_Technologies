@@ -16,6 +16,7 @@
 import { createWhatsAppClientFor } from "./whatsapp.mjs";
 import { expiryFromSeconds, tokenExpired, tokenNeedsRefresh } from "./integrations.mjs";
 import { log, logError } from "./logger.mjs";
+import { QR_PROVIDER, createQrWhatsAppClient } from "./qrGateway.mjs";
 
 /**
  * Returns a client bound to this business's credentials, or null when the
@@ -28,12 +29,24 @@ import { log, logError } from "./logger.mjs";
  * that predate it) the shared client is returned, because in that
  * configuration there is only one tenant and nothing to confuse it with.
  */
-export async function clientForBusiness(businessId, { wa, integrations, embeddedSignup }) {
+export async function clientForBusiness(businessId, { wa, integrations, embeddedSignup, qrGateway, templates }) {
   if (!integrations) return wa ?? null;
   if (!businessId) return null;
 
   let integration = await integrations.forBusiness(businessId);
   if (!integration?.phoneNumberId) return null;
+
+  // The unofficial QR route sends from the business's own number through
+  // the gateway. Still this business's own number, so the rule above holds.
+  // Only while the gateway last reported it connected: a logged-out or
+  // blocked number refuses here, visibly, instead of failing at WhatsApp.
+  if (integration.provider === QR_PROVIDER) {
+    if (integration.status !== "CONNECTED" || !qrGateway) {
+      log("outbound_refused_qr_offline", { businessId, status: integration.status, gateway: Boolean(qrGateway) });
+      return null;
+    }
+    return createQrWhatsAppClient({ gateway: qrGateway, businessId, templates });
+  }
 
   let secrets = integrations.secretsOf(integration);
   if (!secrets?.accessToken) return null;
@@ -73,6 +86,31 @@ export async function clientForBusiness(businessId, { wa, integrations, embedded
     phoneNumberId: integration.phoneNumberId,
     accessToken: secrets.accessToken,
   });
+}
+
+/**
+ * The client a business's OWNER ALERTS go out on.
+ *
+ * Normally the business's own client. A business on the QR route is the
+ * exception: its alert would go from the owner's number to the owner, and
+ * WhatsApp doesn't notify anyone about a message to themselves. So its
+ * alerts go from MissedCall's own official number (the deployment's
+ * META_* client) using the approved `new_lead_alert` template. This is the
+ * one deliberate use of the shared client for a tenant: the recipient is
+ * the business's own owner, and the template names the business, so no
+ * customer ever hears from another business's number.
+ */
+export async function ownerAlertClientForBusiness(businessId, deps) {
+  const integration = deps.integrations && businessId ? await deps.integrations.forBusiness(businessId) : null;
+  if (integration?.provider === QR_PROVIDER) {
+    const official = deps.config?.META_ACCESS_TOKEN && deps.config?.META_PHONE_NUMBER_ID;
+    if (!official || !deps.wa) {
+      log("owner_alert_no_official_number", { businessId });
+      return null;
+    }
+    return deps.wa;
+  }
+  return clientForBusiness(businessId, deps);
 }
 
 /**

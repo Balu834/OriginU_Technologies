@@ -83,7 +83,10 @@ export async function handleInboundMessage(
   // webhook via businessContext(). It is never derived from the customer's
   // message, and it is optional: without it every composed line is empty
   // and the conversation behaves exactly as it did before.
-  { store, wa, config, templates, context = null }
+  // `alertWa`, when given, is what owner alerts go out on instead of `wa`
+  // (see ownerAlertClientForBusiness: QR businesses alert from MissedCall's
+  // official number).
+  { store, wa, config, templates, context = null, alertWa = null }
 ) {
   const existing = await store.getConversation(from);
   // A new missed call since this conversation last moved means the customer
@@ -136,7 +139,7 @@ export async function handleInboundMessage(
     let via = "text";
     let result;
     if (alertLead) {
-      ({ result, via } = await sendOwnerAlert(wa, {
+      ({ result, via } = await sendOwnerAlert(alertWa ?? wa, {
         to,
         lead: alertLead,
         businessName: context?.name || config.BUSINESS_NAME,

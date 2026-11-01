@@ -7,7 +7,7 @@ import { createMessage, providerMessageId } from "../lib/messages.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
 import { integrationState } from "../lib/integrations.mjs";
-import { clientForBusiness } from "../lib/outbound.mjs";
+import { ownerAlertClientForBusiness } from "../lib/outbound.mjs";
 import { deleteLead } from "../lib/deleteLead.mjs";
 import { landingPage } from "../lib/landing.mjs";
 import { PLAN_ENTITLEMENTS, formatPrice } from "../lib/billing.mjs";
@@ -264,8 +264,10 @@ export async function handleRetryNotification(ctx, deps) {
 
   // The retry goes out on this business's own integration. If it has none,
   // nothing is sent: a notification delivered from another tenant's
-  // WhatsApp number is worse than one that visibly failed.
-  const client = await clientForBusiness(tenant.actor.businessId, deps);
+  // WhatsApp number is worse than one that visibly failed. (QR-route
+  // businesses alert from MissedCall's official number: see
+  // ownerAlertClientForBusiness.)
+  const client = await ownerAlertClientForBusiness(tenant.actor.businessId, deps);
   if (!client) {
     log("notification_retry_failed", { leadId: id, reason: "no integration for this business" });
     await tenantStore.saveLead({ ...lead, ownerNotified: false, updatedAt: new Date().toISOString() });

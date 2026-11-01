@@ -31,10 +31,12 @@ import { embeddedSignupConfig, createEmbeddedSignupClient } from "./lib/embedded
 import { createBillingService } from "./lib/billing.mjs";
 import { createUsageService } from "./lib/usage.mjs";
 import { razorpayConfig, createRazorpayClient } from "./lib/razorpay.mjs";
+import { qrGatewayFromConfig } from "./lib/qrGateway.mjs";
 import { log, logError } from "./lib/logger.mjs";
 import { dispatch, NON_JSON_POSTS } from "./routes/router.mjs";
 import { handleMissedCall, handleIvrMissedCall } from "./routes/missedCall.mjs";
 import { verifyWebhookGet, handleWebhookPost } from "./routes/webhook.mjs";
+import { handleQrEvent } from "./routes/qrEvents.mjs";
 
 import templates from "./templates.json" with { type: "json" };
 
@@ -59,6 +61,9 @@ export function buildApp(config) {
       })
     : null;
 
+  // The unofficial QR-code route's gateway, or null when not configured.
+  const qrGateway = qrGatewayFromConfig(config);
+
   /** Dispatches one request via the shared route table (routes/router.mjs). */
   async function handle(ctx) {
     const deps = {
@@ -72,10 +77,12 @@ export function buildApp(config) {
       usage: createUsageService(store),
       razorpay: rzpConfig,
       razorpayClient: createRazorpayClient(rzpConfig),
+      qrGateway,
     };
     if (ctx.method === "GET" && ctx.pathname === "/webhook") return verifyWebhookGet(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/webhook") return handleWebhookPost(ctx, deps);
     if (ctx.method === "POST" && ctx.pathname === "/missed-call") return handleMissedCall(ctx, deps);
+    if (ctx.method === "POST" && ctx.pathname === "/qr/events") return handleQrEvent(ctx, deps);
     if ((ctx.method === "GET" || ctx.method === "POST") && ctx.pathname === "/ivr/missed-call") return handleIvrMissedCall(ctx, deps);
     return (await dispatch(ctx, deps)) ?? { status: 404, body: { error: "not found" } };
   }

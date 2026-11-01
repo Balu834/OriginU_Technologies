@@ -1,10 +1,8 @@
 import { verifySignature } from "../lib/whatsapp.mjs";
 import { clientForBusiness, refusingClient } from "../lib/outbound.mjs";
-import { businessContext } from "../lib/businesses.mjs";
 import { scopedToBusiness } from "../lib/store.redis.mjs";
-import { handleInboundMessage } from "../lib/conversation.mjs";
+import { processInboundMessage, tenantConfigFor } from "../lib/inbound.mjs";
 import { log, logError } from "../lib/logger.mjs";
-import { toE164 } from "../lib/phone.mjs";
 
 /**
  * How long after a missed call MissedCall may answer that caller on a
@@ -47,7 +45,7 @@ export function verifyWebhookGet(ctx, { config }) {
  * each is wrapped in its own try/catch.
  */
 export function handleWebhookPost(ctx, deps) {
-  const { config, store, wa, templates, businesses, integrations, verifySecrets } = deps;
+  const { config, store, wa, businesses, integrations, verifySecrets } = deps;
 
   // Signature is checked against the app secret before the payload can be
   // parsed, so the business is not yet known. Meta signs with the APP
@@ -142,10 +140,7 @@ export function handleWebhookPost(ctx, deps) {
         const tenantWa = business
           ? ((await clientForBusiness(business.id, deps)) ?? refusingClient(business.id, log))
           : wa;
-        const tenantConfig = business
-          ? { ...config, BUSINESS_NAME: business.name, OWNER_NAME: business.ownerName,
-              MOHAMED_WHATSAPP_NUMBER: business.ownerWhatsApp }
-          : config;
+        const tenantConfig = tenantConfigFor(config, business);
 
         // Delivery receipts for messages we sent. These say what actually
         // happened to a message, as opposed to the API having accepted it.
@@ -213,68 +208,34 @@ export function handleWebhookPost(ctx, deps) {
 
         for (const msg of change.value?.messages ?? []) {
           try {
-            if (!msg.id) {
-              log("message_missing_id", { type: msg.type });
-            } else {
-              if (await tenantStore.hasProcessedMessage(msg.id)) {
-                log("duplicate_message_ignored", { messageId: msg.id });
-                continue;
+            await processInboundMessage(
+              {
+                id: msg.id,
+                type: msg.type,
+                from: msg.from?.startsWith("+") ? msg.from : `+${msg.from}`,
+                text: msg.text?.body,
+                timestamp: msg.timestamp,
+              },
+              {
+                business, tenantStore, tenantWa, tenantConfig, deps,
+                // On a number the owner also uses in the WhatsApp Business
+                // app, most messages are ordinary chats with the owner. Only
+                // someone who just gave a missed call is MissedCall's to
+                // answer, and only until the owner replies to them from the app.
+                mayReply: integration?.coexistence
+                  ? async (from) => {
+                      const decision = coexistenceMayReply({
+                        lastMissedCallAt: tenantStore.lastMissedCallAt ? await tenantStore.lastMissedCallAt(from) : null,
+                        lastOwnerReplyAt: tenantStore.lastOwnerReplyAt ? await tenantStore.lastOwnerReplyAt(from) : null,
+                      });
+                      if (!decision.ok) {
+                        log("coexistence_message_left_to_owner", { businessId: business?.id, reason: decision.reason });
+                      }
+                      return decision.ok;
+                    }
+                  : null,
               }
-              await tenantStore.markMessageProcessed(msg.id);
-            }
-
-            if (msg.type !== "text") {
-              log("unsupported_message_type_ignored", { type: msg.type });
-              continue;
-            }
-
-            const from = msg.from.startsWith("+") ? msg.from : `+${msg.from}`;
-
-            // The owner messaging their own business number (to keep alerts
-            // flowing, or to test) is not a customer, and must not be asked
-            // "what do you need?" or turned into a lead about themselves.
-            // Compared in E.164 so a legacy unprefixed owner number still matches.
-            if (business?.ownerWhatsApp && from === (toE164(business.ownerWhatsApp) ?? business.ownerWhatsApp)) {
-              log("owner_message_ignored", { businessId: business.id });
-              continue;
-            }
-
-            // On a number the owner also uses in the WhatsApp Business app,
-            // most messages are ordinary chats with the owner. Only someone
-            // who just gave a missed call is MissedCall's to answer, and only
-            // until the owner replies to them from the app.
-            if (integration?.coexistence) {
-              const decision = coexistenceMayReply({
-                lastMissedCallAt: tenantStore.lastMissedCallAt ? await tenantStore.lastMissedCallAt(from) : null,
-                lastOwnerReplyAt: tenantStore.lastOwnerReplyAt ? await tenantStore.lastOwnerReplyAt(from) : null,
-              });
-              if (!decision.ok) {
-                log("coexistence_message_left_to_owner", { businessId: business?.id, reason: decision.reason });
-                continue;
-              }
-            }
-
-            log("customer_reply_received", { from, businessId: business?.id });
-
-            const result = await handleInboundMessage(
-              { from, text: msg.text.body, messageId: msg.id, messageType: msg.type, timestamp: msg.timestamp },
-              // The routed business's own configuration. Built from the
-              // business resolved by phone_number_id, so one tenant's
-              // services, areas or greeting can never reach another's reply.
-              { store: tenantStore, wa: tenantWa, config: tenantConfig, templates,
-                context: business ? businessContext(business) : null }
             );
-            if (result.emergency) log("emergency_detected", { from });
-            if (result.leadCompleted) {
-              log("lead_completed", { from, leadId: result.lead?.id });
-              // Metered, not gated. A redelivery never reaches this line —
-              // the idempotency check above drops it — so Meta's retries
-              // cannot inflate the count. Deliberately no limit check
-              // here: refusing mid-conversation would strand a customer
-              // who has already answered our questions, and discard a lead
-              // the business has effectively already earned.
-              if (business && deps.usage) await deps.usage.record(business.id, "leads", 1);
-            }
           } catch (err) {
             logError("message_processing_error", err, {});
           }
