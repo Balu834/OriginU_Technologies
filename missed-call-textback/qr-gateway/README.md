@@ -50,7 +50,9 @@ Keep it safe and never change it: losing it means every QR business re-scans. A 
 machine ever holds a session. Logout, a WhatsApp unlink or a ban deletes all
 of that business's keys.
 
-No chat history is synced. Groups, status, broadcasts and channels are
+Full and recent chat history are never synced; only the small start-up batches
+Baileys needs for contact-id mappings, which the gateway ignores (nothing from
+them is forwarded or stored). Groups, status, broadcasts and channels are
 dropped in the gateway. Sends show "typing…" for a moment first and are
 capped per number per hour (`QR_MAX_SENDS_PER_HOUR`, default 60).
 
