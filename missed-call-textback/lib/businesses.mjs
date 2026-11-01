@@ -46,6 +46,9 @@ export function businessRecord({
   templateLanguage = "en",
   passwordHash = "",
   status = "active",
+  // The marketer's code this business signed up through (lib/referrals.mjs),
+  // or "" when it came on its own. Set once, at creation.
+  referralCode = "",
   createdAt = null,
   updatedAt = null,
 } = {}) {
@@ -69,6 +72,7 @@ export function businessRecord({
     templateLanguage,
     passwordHash,
     status,
+    referralCode: String(referralCode ?? ""),
     createdAt: createdAt ?? now,
     updatedAt: updatedAt ?? now,
   };

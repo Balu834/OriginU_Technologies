@@ -19,6 +19,7 @@ import {
 } from "../lib/settingsViews.mjs";
 import { log, logError } from "../lib/logger.mjs";
 import { toE164 } from "../lib/phone.mjs";
+import { referralCookieFor, referralFromRequest, clearedReferralCookie, withCookie } from "../lib/referrals.mjs";
 import { qrOfferedTo, actorEmail, QR_FAILURE_MESSAGES } from "../lib/qrGateway.mjs";
 import crypto from "node:crypto";
 
@@ -47,7 +48,8 @@ async function actorFor(ctx, { store, accounts }) {
 // ---------------------------------------------------------------- signup
 
 export function handleSignupGet(ctx, deps) {
-  return { status: 200, html: signupPage({ google: googleSignInAvailable(deps?.config) }) };
+  // A marketer's ?ref= link remembers their code until onboarding.
+  return withCookie({ status: 200, html: signupPage({ google: googleSignInAvailable(deps?.config) }) }, referralCookieFor(ctx));
 }
 
 export async function handleSignupPost(ctx, deps) {
@@ -130,15 +132,20 @@ export async function handleOnboardingPost(ctx, deps) {
     ownerWhatsApp,
     areas: (form.get("areas") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     services: (form.get("services") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    // Which marketer's link this signup came through, from the cookie set
+    // when they opened it. Never from the form, so it can't be typed in.
+    referralCode: referralFromRequest(ctx),
   });
 
   await accounts.createBusinessFor(user, business);
 
   // Re-issue the session now bound to the business the user just created.
   const sessionId = await createSession(store, business.id, { userId: user.id });
-  log("business_created", { businessId: business.id });
+  log("business_created", { businessId: business.id, referralCode: business.referralCode || null });
 
-  return { status: 302, headers: { Location: "/settings/whatsapp", "Set-Cookie": sessionCookie(sessionId) }, body: {} };
+  const done = { status: 302, headers: { Location: "/settings/whatsapp", "Set-Cookie": sessionCookie(sessionId) }, body: {} };
+  // The code has been used; drop it so it can't land on a second business.
+  return business.referralCode ? withCookie(done, clearedReferralCookie()) : done;
 }
 
 // ------------------------------------------------- WhatsApp settings UI
