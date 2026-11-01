@@ -161,7 +161,7 @@ Two things worth knowing:
 For an owner with no Facebook at all, the page can also offer **"Connect by
 scanning a QR code (unofficial)"**. MissedCall then links to the owner's own
 WhatsApp as a linked device, like WhatsApp Web, through a separate always-on
-service in [`qr-gateway/`](qr-gateway/README.md) running on Fly.io (Mumbai).
+service in [`qr-gateway/`](qr-gateway/README.md) running on Fly.io (Singapore; Fly no longer offers Mumbai).
 
 - **It breaks WhatsApp's terms, and the number can be banned without
   warning.** The ban lands on the customer's real business number. The page

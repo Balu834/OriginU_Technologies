@@ -135,7 +135,7 @@ async function main() {
     process.exit(1);
   }
   if (!isValidEncryptionKey(env.INTEGRATION_ENCRYPTION_KEY)) {
-    console.error("INTEGRATION_ENCRYPTION_KEY must be the same 64-hex-character key the app uses");
+    console.error("INTEGRATION_ENCRYPTION_KEY must be 64 hex characters (32 bytes)");
     process.exit(1);
   }
   if (env.QR_GATEWAY_SECRET.length < 32) {

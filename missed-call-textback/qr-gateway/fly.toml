@@ -1,10 +1,10 @@
-# MissedCall QR gateway on Fly.io, Mumbai.
+# MissedCall QR gateway on Fly.io, Singapore (Fly closed Mumbai/bom to new machines).
 # Deploy from the missed-call-textback folder:
 #   fly deploy . --config qr-gateway/fly.toml --dockerfile qr-gateway/Dockerfile
 # Secrets (fly secrets set ...): KV_REST_API_URL, KV_REST_API_TOKEN,
 # INTEGRATION_ENCRYPTION_KEY, QR_GATEWAY_SECRET, MISSEDCALL_APP_URL.
 app = "missedcall-qr-gateway"
-primary_region = "bom"
+primary_region = "sin"
 kill_signal = "SIGTERM"
 kill_timeout = 20
 

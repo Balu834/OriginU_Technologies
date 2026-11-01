@@ -3,9 +3,10 @@
  *
  * What is stored here is, in effect, a logged-in WhatsApp device for a
  * real business number: anyone holding it can read and send that
- * business's messages. So every value is encrypted with the same
- * AES-256-GCM helper and key (INTEGRATION_ENCRYPTION_KEY) the app uses for
- * Meta access tokens, and the key never sits beside the data.
+ * business's messages. So every value is encrypted with the app's
+ * AES-256-GCM helper, under the gateway's own INTEGRATION_ENCRYPTION_KEY
+ * (it need not match the app's: neither side decrypts the other's data),
+ * and the key never sits beside the data.
  *
  * Layout, per business:
  *   waqr:<id>:creds              the device credentials

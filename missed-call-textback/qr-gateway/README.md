@@ -43,8 +43,10 @@ Every request both ways is signed with `QR_GATEWAY_SECRET`
 Requests to the gateway also carry a one-time `requestId`.
 
 Sessions are stored in the same Upstash Redis as the app, under `waqr:*`,
-every value AES-256-GCM encrypted with the app's `INTEGRATION_ENCRYPTION_KEY`
-(`../lib/crypto.mjs`). A per-business lock (`waqr:lock:<id>`) means only one
+every value AES-256-GCM encrypted (`../lib/crypto.mjs`) with the gateway's own
+`INTEGRATION_ENCRYPTION_KEY`. It doesn't need to match the app's key: the app
+never reads these sessions, and the gateway never reads the app's Meta tokens.
+Keep it safe and never change it: losing it means every QR business re-scans. A per-business lock (`waqr:lock:<id>`) means only one
 machine ever holds a session. Logout, a WhatsApp unlink or a ban deletes all
 of that business's keys.
 
@@ -57,7 +59,7 @@ capped per number per hour (`QR_MAX_SENDS_PER_HOUR`, default 60).
 | Variable | What |
 |---|---|
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | The app's Upstash Redis (same values as Vercel) |
-| `INTEGRATION_ENCRYPTION_KEY` | Same 64-hex key as the app |
+| `INTEGRATION_ENCRYPTION_KEY` | 64 hex characters, the gateway's own key (may differ from the app's) |
 | `QR_GATEWAY_SECRET` | ≥32 chars, same value as the app's `QR_GATEWAY_SECRET` |
 | `MISSEDCALL_APP_URL` | The app's public URL, e.g. `https://missedcall.originutech.in` |
 | `QR_MAX_SENDS_PER_HOUR` | Optional, default 60 |
@@ -68,10 +70,11 @@ On the app (Vercel): `QR_GATEWAY_URL=https://<app>.fly.dev`, the same
 shown. Also make sure the `new_lead_alert` template is approved in MissedCall's
 own WABA, since QR businesses' owner alerts go from that number.
 
-## Deploy (Fly.io, Mumbai) — only after approval
+## Deploy (Fly.io, Singapore) — only after approval
 
-From the `missed-call-textback` folder (the image also copies two files from
-`lib/`):
+Fly closed its Mumbai region (`bom`) to new machines in 2026, so the gateway
+runs in Singapore (`sin`), the nearest open region. From the `missed-call-textback`
+folder (the image also copies two files from `lib/`):
 
 ```bash
 fly apps create missedcall-qr-gateway
