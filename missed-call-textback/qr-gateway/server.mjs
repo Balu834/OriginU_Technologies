@@ -35,6 +35,53 @@ function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
 }
 
+// libsignal (under Baileys) calls console.* directly, outside pino, and some
+// of those calls pass a whole SessionEntry: ratchet keys, ephemeral key pairs,
+// remote identity keys. Those must never reach Fly's log storage.
+const LIBSIGNAL_PREFIXES = [
+  "Closing session",
+  "Closing open session",
+  "Closing stale open session",
+  "Opening session",
+  "Removing old closed session",
+  "Session already closed",
+  "Session already open",
+  "Migrating session to",
+  "Decrypted message with closed session",
+  "Unhandled bucket type",
+];
+const SESSION_KEYS = ["currentRatchet", "indexInfo", "ephemeralKeyPair", "lastRemoteEphemeralKey", "remoteIdentityKey", "_chains"];
+
+function looksLikeSession(value) {
+  if (!value || typeof value !== "object") return false;
+  return SESSION_KEYS.some((k) => Object.prototype.hasOwnProperty.call(value, k));
+}
+
+/** True when a console call is libsignal noise or carries Signal session data. */
+export function isLibsignalConsoleNoise(args) {
+  const [first] = args;
+  if (typeof first === "string") {
+    if (first.startsWith('{"at":')) return false; // the gateway's own log() lines
+    if (LIBSIGNAL_PREFIXES.some((p) => first.startsWith(p))) return true;
+  }
+  return args.some(looksLikeSession);
+}
+
+/** Wraps console.log/info/warn/debug/error so libsignal noise is dropped. */
+export function installConsoleFilter(target = console) {
+  for (const method of ["log", "info", "warn", "debug", "error"]) {
+    const original = target[method];
+    if (typeof original !== "function" || original.libsignalFiltered) continue;
+    const filtered = function (...args) {
+      if (isLibsignalConsoleNoise(args)) return;
+      return original.apply(this, args);
+    };
+    filtered.libsignalFiltered = true;
+    target[method] = filtered;
+  }
+  return target;
+}
+
 /**
  * The request handler, separate from the HTTP server so tests can call it.
  * `onFly` turns "session is on another machine" into a fly-replay header.
@@ -142,6 +189,9 @@ async function main() {
     console.error("QR_GATEWAY_SECRET must be at least 32 characters");
     process.exit(1);
   }
+
+  // Before Baileys (and libsignal) load, so none of their console output escapes.
+  installConsoleFilter();
 
   // Loaded here, not at the top, so the tests never need a WhatsApp library.
   const baileysModule = await import("@whiskeysockets/baileys");

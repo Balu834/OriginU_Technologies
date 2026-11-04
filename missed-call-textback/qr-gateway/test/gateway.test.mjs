@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import { createMemoryRedis } from "../lib/redis.mjs";
 import { useRedisAuthState, clearAuthState, hasLinkedDevice } from "../lib/authState.mjs";
 import { createSessionManager, phoneFromJid, isPersonalChat, textOf, closeReason } from "../lib/sessions.mjs";
-import { createGatewayHandler } from "../server.mjs";
+import { createGatewayHandler, isLibsignalConsoleNoise, installConsoleFilter } from "../server.mjs";
 import { createForwarder } from "../lib/forward.mjs";
 import { signQrRequest, verifyQrRequest, QR_SIGNATURE_HEADER } from "../../lib/qrSigning.mjs";
 
@@ -480,4 +480,36 @@ test("a send gives up as not_connected if the reconnect doesn't finish in time",
   await flush();
   const result = await env.manager.send("biz1", { to: "+917000000001", text: "x" });
   assert.equal(result.code, "not_connected");
+});
+
+// ---------------------------------------------------------------- log hygiene
+
+test("libsignal console noise and session dumps are recognised", () => {
+  const session = {
+    currentRatchet: { ephemeralKeyPair: { pubKey: Buffer.alloc(33), privKey: Buffer.alloc(32) } },
+    indexInfo: { closed: -1 },
+  };
+  assert.equal(isLibsignalConsoleNoise(["Closing session:", session]), true);
+  assert.equal(isLibsignalConsoleNoise(["Closing open session in favor of incoming prekey bundle"]), true);
+  assert.equal(isLibsignalConsoleNoise(["Removing old closed session:", session]), true);
+  assert.equal(isLibsignalConsoleNoise(["Session already closed", session]), true);
+  assert.equal(isLibsignalConsoleNoise(["anything else", { remoteIdentityKey: Buffer.alloc(33) }]), true);
+  assert.equal(isLibsignalConsoleNoise([session]), true);
+  assert.equal(isLibsignalConsoleNoise(['{"at":"2026-01-01T00:00:00.000Z","event":"session.open"}']), false);
+  assert.equal(isLibsignalConsoleNoise(["Failed to decrypt message with any known session..."]), false);
+  assert.equal(isLibsignalConsoleNoise(["Missing environment variables: X"]), false);
+});
+
+test("the console filter drops libsignal output and keeps the gateway's own lines", () => {
+  const printed = [];
+  const target = {};
+  for (const m of ["log", "info", "warn", "debug", "error"]) target[m] = (...args) => printed.push([m, ...args]);
+  installConsoleFilter(target);
+  installConsoleFilter(target); // idempotent
+  const line = JSON.stringify({ at: "2026-01-01T00:00:00.000Z", event: "ready" });
+  target.log(line);
+  target.info("Closing session:", { currentRatchet: {}, indexInfo: { closed: -1 } });
+  target.warn("Closing open session in favor of incoming prekey bundle");
+  target.error("Session error:Error: Bad MAC");
+  assert.deepEqual(printed, [["log", line], ["error", "Session error:Error: Bad MAC"]]);
 });
