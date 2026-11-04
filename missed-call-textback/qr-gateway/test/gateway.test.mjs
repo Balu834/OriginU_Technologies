@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import crypto from "node:crypto";
 import { createMemoryRedis } from "../lib/redis.mjs";
 import { useRedisAuthState, clearAuthState, hasLinkedDevice } from "../lib/authState.mjs";
-import { createSessionManager, phoneFromJid, isPersonalChat, textOf } from "../lib/sessions.mjs";
+import { createSessionManager, phoneFromJid, isPersonalChat, textOf, closeReason } from "../lib/sessions.mjs";
 import { createGatewayHandler } from "../server.mjs";
 import { createForwarder } from "../lib/forward.mjs";
 import { signQrRequest, verifyQrRequest, QR_SIGNATURE_HEADER } from "../../lib/qrSigning.mjs";
@@ -437,4 +437,47 @@ test("the forwarder signs events and retries a server error", async () => {
   assert.equal(calls.length, 2);
   assert.equal(calls[0].url, "https://app.example/qr/events");
   assert.equal(verifyQrRequest(calls[1].init.body, calls[1].init.headers[QR_SIGNATURE_HEADER], SECRET), true);
+});
+
+// ---------------------------------------------------------------- brief drops
+
+test("closeReason names the stream error's tag and class, never ids", () => {
+  const error = { data: { tag: "stream:error", attrs: {}, content: [{ tag: "ack", attrs: { class: "status", type: "text", id: "3EB0ABC" } }] } };
+  assert.equal(closeReason(error), "ack:status");
+  assert.equal(closeReason({ data: { tag: "stream:error", attrs: { code: "515" } } }), null);
+  assert.equal(closeReason(undefined), null);
+});
+
+test("a send during a brief reconnect waits for the link and then goes out", async () => {
+  let env;
+  let first;
+  env = setup({
+    // Real short waits, so the gateway's own reconnect timer (2s) fires.
+    sleep: async () => {
+      await new Promise((r) => setTimeout(r, 250));
+      const sock = env.sockets.at(-1);
+      if (sock !== first && !sock.opened) {
+        sock.opened = true;
+        sock.emitConnection({ connection: "open" });
+        await flush();
+      }
+    },
+  });
+  first = await connect(env);
+  first.emitConnection({ connection: "close", lastDisconnect: { error: { output: { statusCode: 500 } } } });
+  await flush();
+  assert.equal((await env.manager.status("biz1")).state, "reconnecting");
+  const result = await env.manager.send("biz1", { to: "+917000000001", text: "Sorry we missed your call" });
+  assert.equal(result.ok, true);
+  assert.equal(first.sent.length, 0);
+  assert.equal(env.sockets.at(-1).sent.length, 1);
+});
+
+test("a send gives up as not_connected if the reconnect doesn't finish in time", async () => {
+  const env = setup();
+  const sock = await connect(env);
+  sock.emitConnection({ connection: "close", lastDisconnect: { error: { output: { statusCode: 500 } } } });
+  await flush();
+  const result = await env.manager.send("biz1", { to: "+917000000001", text: "x" });
+  assert.equal(result.code, "not_connected");
 });
