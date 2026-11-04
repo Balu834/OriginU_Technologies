@@ -34,6 +34,23 @@ const FORBIDDEN = 403;
 const REPLACED = 440;
 const RESTART_REQUIRED = 515;
 const MAX_RECONNECT_ATTEMPTS = 8;
+// WhatsApp drops a healthy link now and then and it comes back within a
+// few seconds. A send that lands in that gap waits this long for it.
+const SEND_WAIT_MS = 12_000; // the app gives the whole send 25s
+const SEND_POLL_MS = 500;
+
+/**
+ * Why WhatsApp closed the stream, as "tag" or "tag:class" (e.g.
+ * "ack:status"), from the stream:error node Baileys attaches. Only tag and
+ * class names, never ids, numbers or content.
+ */
+export function closeReason(error) {
+  const node = error?.data;
+  const child = Array.isArray(node?.content) ? node.content.find((c) => c && typeof c.tag === "string") : null;
+  if (!child) return null;
+  const cls = child.attrs?.class;
+  return /^[a-z_:-]{1,40}$/i.test(child.tag) ? (cls && /^[a-z_-]{1,40}$/i.test(cls) ? `${child.tag}:${cls}` : child.tag) : null;
+}
 
 const RECEIPT_STATUS = { 0: "failed", 2: "sent", 3: "delivered", 4: "read", 5: "read" };
 
@@ -241,7 +258,7 @@ export function createSessionManager({
       if (s.stopping) return;
       const code = lastDisconnect?.error?.output?.statusCode ?? null;
       s.sock = null;
-      log("qr_session_closed", { businessId: s.businessId, code });
+      log("qr_session_closed", { businessId: s.businessId, code, reason: closeReason(lastDisconnect?.error) });
 
       if (code === LOGGED_OUT) return finish(s, "logged_out");
       if (code === FORBIDDEN) return finish(s, "banned");
@@ -390,9 +407,24 @@ export function createSessionManager({
     return out;
   }
 
+  /** The live session, waiting out a short reconnect; null if it doesn't come back in time. */
+  async function liveSession(businessId) {
+    const isLive = (s) => s && s.state === "connected" && s.sock;
+    let s = sessions.get(businessId);
+    if (isLive(s)) return s;
+    if (s?.state !== "reconnecting") return null;
+    for (let waited = 0; waited < SEND_WAIT_MS; waited += SEND_POLL_MS) {
+      await sleep(SEND_POLL_MS);
+      s = sessions.get(businessId);
+      if (isLive(s)) return s;
+      if (s?.state !== "reconnecting") return null;
+    }
+    return null;
+  }
+
   async function send(businessId, { to, text } = {}) {
-    const s = sessions.get(businessId);
-    if (!s || s.state !== "connected" || !s.sock) return { ok: false, code: "not_connected" };
+    const s = await liveSession(businessId);
+    if (!s) return { ok: false, code: "not_connected" };
     const digits = String(to ?? "").replace(/\D/g, "");
     if (!/^\d{8,15}$/.test(digits)) return { ok: false, code: "bad_number" };
     const body = String(text ?? "");
