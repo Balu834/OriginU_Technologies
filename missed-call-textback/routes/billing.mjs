@@ -32,6 +32,11 @@ export async function handleBillingGet(ctx, deps) {
   const subscription = await deps.billing.forBusiness(actor.businessId);
   const entitlements = await deps.billing.getBusinessEntitlements(actor.businessId);
   const usage = await deps.usage.summary(actor.businessId);
+  // The free month can cross the 1st, so its lead count is everything since
+  // it began, the same number the missed-call gate enforces.
+  const freeMonthLeads = entitlements.freeTrial && deps.usage.countSince
+    ? await deps.usage.countSince(actor.businessId, "leads", entitlements.freeTrial.startedAt)
+    : null;
 
   return {
     status: 200,
@@ -40,6 +45,7 @@ export async function handleBillingGet(ctx, deps) {
       subscription: publicSubscription(subscription),
       entitlements,
       usage,
+      freeMonthLeads,
       plans: PLAN_ENTITLEMENTS,
       role: actor.role,
       // An upgrade action is offered only when the server can genuinely

@@ -11,7 +11,7 @@ import { integrationState } from "../lib/integrations.mjs";
 import { ownerAlertClientForBusiness } from "../lib/outbound.mjs";
 import { deleteLead } from "../lib/deleteLead.mjs";
 import { landingPage } from "../lib/landing.mjs";
-import { PLAN_ENTITLEMENTS, formatPrice } from "../lib/billing.mjs";
+import { PLAN_ENTITLEMENTS, formatPrice, FREE_TRIAL } from "../lib/billing.mjs";
 import { log } from "../lib/logger.mjs";
 
 /**
@@ -27,6 +27,8 @@ export function handleLanding(ctx) {
       price: formatPrice(name),
       leads: PLAN_ENTITLEMENTS[name].leadsPerMonth,
       messages: PLAN_ENTITLEMENTS[name].messagesPerMonth,
+      // Free is a first-month trial; the page says how long, from the same source.
+      trialDays: name === "FREE" ? FREE_TRIAL.days : null,
     }])
   );
   // Deliberately no businessName. This is the shared marketing page every

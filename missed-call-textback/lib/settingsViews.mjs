@@ -1022,7 +1022,7 @@ export function teamSettingsPage({ members = [], canManage = false, role = "", e
  */
 export function billingPage({
   business, subscription, entitlements, usage, plans = {}, role = "",
-  checkout = null, pricing = {}, prefill = {}, actor = null,
+  checkout = null, pricing = {}, prefill = {}, actor = null, freeMonthLeads = null,
 } = {}) {
   const plan = entitlements?.plan ?? "FREE";
   const limits = entitlements?.limits ?? {};
@@ -1056,6 +1056,24 @@ export function billingPage({
   const planNote = subscription?.implicit
     ? `<p class="hint" style="margin:8px 0 0">No plan has been selected for this business, so it runs on the default FREE entitlements.</p>`
     : "";
+
+  // Free is a first-month trial (lib/billing.mjs FREE_TRIAL). Say plainly
+  // when it ends, and when it has ended say what that means for callers.
+  const trial = plan === "FREE" ? entitlements?.freeTrial : null;
+  const trialDate = (iso) => {
+    const t = Date.parse(iso ?? "");
+    return Number.isNaN(t) ? "" : new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+  };
+  const freeMonth = !trial ? "" : trial.ended
+    ? `<div class="notice">
+         Your free month ended on ${escapeHtml(trialDate(trial.endsAt))}. New missed calls are not getting a WhatsApp reply.
+         Move to Pro below to switch replies back on. Your leads and dashboard are unchanged.
+       </div>`
+    : `<p class="hint" style="margin:8px 0 0">
+         Free month: ends on ${escapeHtml(trialDate(trial.endsAt))}.
+         Leads used: ${escapeHtml(String(freeMonthLeads ?? usage?.counts?.leads ?? 0))} of ${escapeHtml(String(limits.leadsPerMonth ?? ""))}.
+         After that, new missed calls stop getting a WhatsApp reply until you move to Pro.
+       </p>`;
 
   const degraded = subscription && subscription.plan !== subscription.effectivePlan
     ? `<p class="hint" style="margin:8px 0 0">This business is on ${escapeHtml(subscription.plan)} but its subscription is ${escapeHtml(subscription.status)}, so ${escapeHtml(subscription.effectivePlan)} limits apply.</p>`
@@ -1098,6 +1116,7 @@ export function billingPage({
       </dl>
       ${planNote}
       ${degraded}
+      ${freeMonth}
     </div>
 
     <div class="card">

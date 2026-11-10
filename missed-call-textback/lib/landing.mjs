@@ -14,8 +14,9 @@
  * what the code actually does:
  *   - plan prices and limits come from lib/billing.mjs PLAN_PRICING and
  *     PLAN_ENTITLEMENTS, passed in rather than retyped here
- *   - there is no free TRIAL. FREE is a standing tier, so the page says
- *     "free plan", not "7-day trial"
+ *   - FREE is a first-month trial (lib/billing.mjs FREE_TRIAL), not a
+ *     standing tier, so the page says "free for your first month" and
+ *     never "free forever"; after it, Pro is the way to keep going
  *   - PRO is 500 leads a month, so the page does not say "unlimited"
  *   - lead extraction is rule-based (lib/extract.mjs), not a model, so
  *     nothing here calls it AI
@@ -364,7 +365,9 @@ const faq = (q, a) => `
  *               lib/billing.mjs by being retyped here.
  */
 export function landingPage({ businessName = "", plans = null } = {}) {
-  const free = plans?.FREE ?? { price: "Free", leads: 25, messages: 250 };
+  const free = plans?.FREE ?? { price: "Free", leads: 25, messages: 250, trialDays: 30 };
+  // "your first month" when the trial is the usual 30 days, the exact days otherwise.
+  const firstPeriod = !free.trialDays || free.trialDays === 30 ? "your first month" : `your first ${free.trialDays} days`;
   const pro = plans?.PRO ?? { price: "₹299 / month", leads: 500, messages: 5000 };
   // The card is already headed "Free"; repeating it as the amount reads like a typo.
   const freeAmount = /^free$/i.test(String(free.price).trim()) ? "₹0" : free.price;
@@ -432,7 +435,7 @@ export function landingPage({ businessName = "", plans = null } = {}) {
         </div>
         <p class="reassure">
           <span>${tick} No credit card required</span>
-          <span>${tick} Free plan, ${escapeHtml(String(free.leads))} leads a month</span>
+          <span>${tick} Free for ${escapeHtml(firstPeriod)}, up to ${escapeHtml(String(free.leads))} leads</span>
         </p>
       </div>
 
@@ -566,19 +569,19 @@ export function landingPage({ businessName = "", plans = null } = {}) {
     <div class="wrap">
       <div class="head">
         <h2>Simple Pricing</h2>
-        <p class="lede">Start free. Move up when you're capturing more leads than the free plan allows.</p>
+        <p class="lede">Start free for ${escapeHtml(firstPeriod)}. Then move to Pro to keep replying to every missed call.</p>
       </div>
       <div class="price-grid">
         <div class="plan">
           <h3>Free</h3>
           <div class="amount">${escapeHtml(freeAmount)}</div>
-          <div class="per">No card needed</div>
+          <div class="per">For ${escapeHtml(firstPeriod)} · no card needed</div>
           <ul>
             <li>${tick} Missed-call follow-up</li>
             <li>${tick} WhatsApp automation</li>
             <li>${tick} Lead collection</li>
             <li>${tick} Lead dashboard</li>
-            <li>${tick} Up to ${escapeHtml(count(free.leads))} leads a month</li>
+            <li>${tick} Up to ${escapeHtml(count(free.leads))} leads in ${escapeHtml(firstPeriod)}</li>
           </ul>
           <a class="btn btn-ghost" href="${SIGNUP_URL}">Get Started Free</a>
         </div>
@@ -627,7 +630,7 @@ export function landingPage({ businessName = "", plans = null } = {}) {
       ${faq("Can I manage leads from my phone?",
         "Yes. The dashboard works on a phone, and each lead has call and WhatsApp buttons so you can reach the customer in one tap.")}
       ${faq("How much does it cost?",
-        `The free plan covers up to ${free.leads} leads a month. Pro is ${pro.price} and covers up to ${pro.leads} leads a month.`)}
+        `It's free for ${firstPeriod}, for up to ${free.leads} leads. After that, Pro is ${pro.price} and covers up to ${pro.leads} leads a month. If you don't upgrade, new missed calls simply stop getting a WhatsApp reply; your leads and dashboard stay.`)}
     </div>
   </section>
 

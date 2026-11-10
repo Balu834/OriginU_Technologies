@@ -206,6 +206,51 @@ export async function reportMissedCall(business, input, deps) {
   // already mid-reply.
   if (business && deps.billing && deps.usage) {
     const entitlements = await deps.billing.getBusinessEntitlements(business.id);
+
+    // The free month is over: Free is a first-month trial, so no new
+    // conversations start until the business moves to a paid plan.
+    if (entitlements.freeTrial?.ended) {
+      log("missed_call_free_month_ended", {
+        businessId: business.id, plan: entitlements.plan, endedAt: entitlements.freeTrial.endsAt,
+      });
+      return {
+        status: 402,
+        body: {
+          sent: false,
+          error: "free first month has ended; upgrade to Pro to keep replying to missed calls",
+          reason: "free_month_ended",
+          plan: entitlements.plan,
+          freeMonthEndedAt: entitlements.freeTrial.endsAt,
+        },
+      };
+    }
+
+    // Leads are what the plan promises ("up to 25 leads"), so they are
+    // enforced here too, not only counted. Checked at the start of a
+    // conversation, like messages, so nobody is cut off mid-reply.
+    // In the free month the 25 is for the whole month since sign-up, which
+    // can cross the 1st; on a paid plan it is per calendar month.
+    const leadAllowance = entitlements.freeTrial && deps.usage.checkSince
+      ? await deps.usage.checkSince(business.id, "leads", entitlements, entitlements.freeTrial.startedAt)
+      : await deps.usage.check(business.id, "leads", entitlements);
+    if (!leadAllowance.allowed) {
+      log("missed_call_over_lead_limit", {
+        businessId: business.id, plan: entitlements.plan,
+        used: leadAllowance.used, limit: leadAllowance.limit,
+      });
+      return {
+        status: 402,
+        body: {
+          sent: false,
+          error: "lead limit reached for this plan",
+          reason: "lead_limit",
+          plan: entitlements.plan,
+          used: leadAllowance.used,
+          limit: leadAllowance.limit,
+        },
+      };
+    }
+
     const allowance = await deps.usage.check(business.id, "messages", entitlements);
     if (!allowance.allowed) {
       // Nothing is sent and nothing is recorded — no half-finished state
