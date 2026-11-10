@@ -80,6 +80,38 @@ export function createUsageService(store, { clock = () => new Date() } = {}) {
     },
 
     /**
+     * Total for one metric from the month that `sinceIso` falls in up to
+     * now. Used for the free month, which can straddle two calendar
+     * months: "25 leads in your first month" must not become 25 + 25.
+     */
+    async countSince(businessId, metric, sinceIso) {
+      const since = new Date(sinceIso);
+      if (Number.isNaN(since.getTime())) return this.count(businessId, metric);
+      const now = clock();
+      let total = 0;
+      let cursor = Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), 1);
+      const last = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+      while (cursor <= last) {
+        const periodStart = new Date(cursor).toISOString();
+        total += (await store.getUsage?.(usageKey(businessId, metric, periodStart))) ?? 0;
+        const d = new Date(cursor);
+        cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+      }
+      return total;
+    },
+
+    /** Like check(), but counting everything since `sinceIso` (see countSince). */
+    async checkSince(businessId, metric, entitlements, sinceIso) {
+      const limitKey = LIMIT_FOR[metric];
+      const limit = entitlements?.limits?.[limitKey] ?? null;
+      const used = await this.countSince(businessId, metric, sinceIso);
+      if (limit === null || limit === undefined) {
+        return { allowed: true, used, limit: null, remaining: null, metric };
+      }
+      return { allowed: used < limit, used, limit, remaining: Math.max(0, limit - used), metric };
+    },
+
+    /**
      * Whether one more of `metric` is within the business's limit.
      *
      * Checked BEFORE the billable operation, never after — the point is

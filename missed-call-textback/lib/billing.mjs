@@ -122,6 +122,33 @@ export const PLAN_PRICING = Object.freeze({
   }),
 });
 
+/**
+ * The Free plan is a first-month trial, not a free tier for ever
+ * (Balu, 10 Nov 2026: "25 leads only, first month only").
+ *
+ * - The month runs `days` days from the business's sign-up.
+ * - Businesses that signed up before the trial existed get their month
+ *   from `launch`, not from their old sign-up date, so nobody already
+ *   using MissedCall for free is cut off the day this ships.
+ * - Inside the month the FREE limits still apply (25 leads).
+ * - After it, a FREE business starts no new conversations until it moves
+ *   to a paid plan. A lapsed PRO falls back to FREE and, being past its
+ *   month, does not get a second free one.
+ */
+export const FREE_TRIAL = Object.freeze({
+  days: 30,
+  launch: "2026-11-11T00:00:00+05:30",
+});
+
+/** When a business's free month starts and ends. Pure: same inputs, same answer. */
+export function freeTrialWindow(businessCreatedAt, { days = FREE_TRIAL.days, launch = FREE_TRIAL.launch } = {}) {
+  const launchMs = Date.parse(launch);
+  const createdMs = Date.parse(businessCreatedAt ?? "");
+  const startMs = Number.isNaN(createdMs) ? launchMs : Math.max(createdMs, launchMs);
+  const endMs = startMs + days * 24 * 60 * 60 * 1000;
+  return { days, startedAt: new Date(startMs).toISOString(), endsAt: new Date(endMs).toISOString() };
+}
+
 /** Plans a customer may actually buy online, derived rather than restated. */
 export function purchasablePlans() {
   return PLANS.filter((p) => PLAN_PRICING[p]?.purchasable && PLAN_PRICING[p]?.amountPaise > 0);
@@ -234,7 +261,7 @@ export function publicSubscription(subscription) {
   };
 }
 
-export function createBillingService(store) {
+export function createBillingService(store, { clock = () => new Date(), trial = FREE_TRIAL } = {}) {
   return {
     /** The stored subscription, or the implicit FREE one every business starts with. */
     async forBusiness(businessId) {
@@ -257,7 +284,17 @@ export function createBillingService(store) {
         nominalPlan: subscription?.plan ?? "FREE",
         status: subscription?.status ?? "ACTIVE",
         limits: PLAN_ENTITLEMENTS[plan],
+        // Only FREE is time-limited. A paid plan has no trial to run out.
+        freeTrial: plan === "FREE" ? await this.freeTrialFor(businessId) : null,
       };
+    },
+
+    /** Where this business is in its free month, measured on the server clock. */
+    async freeTrialFor(businessId) {
+      const business = await store.getBusiness?.(businessId);
+      const window = freeTrialWindow(business?.createdAt ?? null, trial);
+      const ended = clock().getTime() >= Date.parse(window.endsAt);
+      return { ...window, ended };
     },
 
     /**
