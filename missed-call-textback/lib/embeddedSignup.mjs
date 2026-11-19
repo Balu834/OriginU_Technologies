@@ -10,11 +10,14 @@
  * `FB.login` callback. The browser forwards all three to this server and
  * the customer never sees, types or holds a credential.
  *
- * WHY IT IS BUILT THIS WAY. There is no redirect-based OAuth endpoint for
- * this flow and one must not be invented: the code arrives in JavaScript,
- * not on a callback URL. That has one useful security consequence — no
- * credential ever travels in a query string, because there is no redirect
- * to put one in. The code is POSTed, over HTTPS, on a same-site session.
+ * HOW THE CODE GETS BACK. On a computer the code arrives in JavaScript
+ * (the popup's `FB.login` callback) and is POSTed, over HTTPS, on a
+ * same-site session. On a phone that popup is a new tab which loses its
+ * link back to our page, so neither the code nor the asset ids can reach
+ * it; there the page uses the manual Facebook Login for Business flow in
+ * the same tab instead, and Meta sends the code to our callback URL (see
+ * lib/embeddedSignupRedirect.mjs for why, and for what keeps that safe).
+ * Both paths end in the same exchange and the same verification below.
  *
  * WHAT THIS MODULE MAY NOT DO. It never returns a token to a caller that
  * renders HTML, never logs one, and never puts one in an error. Meta's own
@@ -28,6 +31,7 @@
  */
 import { log, logError } from "./logger.mjs";
 import { OWNER_ALERT_TEMPLATE } from "./ownerAlert.mjs";
+import { signupRedirectUri } from "./embeddedSignupRedirect.mjs";
 
 /**
  * The Graph version this flow speaks.
@@ -52,6 +56,9 @@ export const SIGNUP_FAILURES = {
   NETWORK_ERROR: "signup_network_error",
   NUMBER_TAKEN: "signup_number_taken",
   CANCELLED: "signup_cancelled",
+  // A same-tab attempt came back with no matching, unused state: too old,
+  // already used, or finished in a different browser from the one it began in.
+  EXPIRED: "signup_expired",
 };
 
 /**
@@ -73,6 +80,8 @@ export const SIGNUP_MESSAGES = {
     "That WhatsApp number is already connected to another account here. Contact support if it should be yours.",
   [SIGNUP_FAILURES.CANCELLED]:
     "WhatsApp connection wasn't completed. You can try again or use Advanced Setup.",
+  [SIGNUP_FAILURES.EXPIRED]:
+    "That connection attempt timed out, or was finished in a different browser. Press the button again and finish the Facebook steps in this same browser.",
 };
 
 /** The friendly sentence for a failure marker, whatever its source. */
@@ -103,6 +112,9 @@ export function embeddedSignupConfig(config = {}) {
     // The secret is required for the code exchange, so a deployment
     // missing it cannot complete a connection and must not offer to.
     available: Boolean(appId && configId && appSecret),
+    // Whether the same-tab flow phones need can run: Meta must have an
+    // address of ours to send the owner back to.
+    sameTab: Boolean(signupRedirectUri(config)),
   };
 }
 
@@ -193,15 +205,18 @@ export function createEmbeddedSignupClient({
     /**
      * Trades the authorization code for a customer-scoped business token.
      *
-     * This is the standard Facebook Login for Business code exchange. No
-     * `redirect_uri` is sent, and that is not an omission: the code came
-     * from `FB.login`, not from a redirect, so there is no URI to confirm
-     * and sending one is rejected.
+     * This is the standard Facebook Login for Business code exchange.
      *
-     * The code's time-to-live is measured in seconds, which is why the
-     * browser posts it the moment it arrives rather than holding it.
+     * - A code from `FB.login` (the popup) is bound to a redirect_uri the
+     *   SDK chose, so `redirectUris` lists candidates to try in turn.
+     * - A code from the same-tab flow is bound to our own callback URL,
+     *   which the caller knows exactly: pass it as `redirectUri` and only
+     *   that form is sent.
+     *
+     * The code's time-to-live is measured in seconds, which is why both
+     * paths exchange it the moment it arrives rather than holding it.
      */
-    async exchangeCode(code, { redirectUris = [] } = {}) {
+    async exchangeCode(code, { redirectUris = [], redirectUri = "" } = {}) {
       const value = String(code ?? "").trim();
       if (!value) return { ok: false, reason: SIGNUP_FAILURES.MISSING_CODE };
 
@@ -214,7 +229,10 @@ export function createEmbeddedSignupClient({
       // vouches for. The first one Meta accepts wins.
       // null = parameter omitted (the documented form); "" = present but
       // empty, which is what some JS SDK popup logins are bound to.
-      const attempts = [null, "", ...redirectUris.filter((u) => typeof u === "string" && u)];
+      const exact = typeof redirectUri === "string" && redirectUri ? redirectUri : null;
+      const attempts = exact
+        ? [exact]
+        : [null, "", ...redirectUris.filter((u) => typeof u === "string" && u)];
       let res;
       for (const redirectUri of attempts) {
         const params = new URLSearchParams({ client_id: appId, client_secret: appSecret, code: value });

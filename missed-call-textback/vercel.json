@@ -58,6 +58,14 @@
       "destination": "/api/app"
     },
     {
+      "source": "/settings/whatsapp/start",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/settings/whatsapp/callback",
+      "destination": "/api/app"
+    },
+    {
       "source": "/settings/whatsapp/test",
       "destination": "/api/app"
     },

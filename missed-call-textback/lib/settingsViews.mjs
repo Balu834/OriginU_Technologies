@@ -450,16 +450,26 @@ export function whatsappSettingsPage({
                Your chats, contacts and number stay as they are, and MissedCall only replies to people who
                gave you a missed call. Update the app first; regular WhatsApp (not Business) can't do this.
              </p>
-             <button type="button" id="connect-whatsapp-app" class="full" data-mode="app">Keep my WhatsApp Business app (scan a QR code)</button>
-             <button type="button" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>
+             ${signup.sameTab
+               // A real form, so a phone (or a browser with no JavaScript)
+               // goes to Meta in this same tab and comes back here by itself.
+               // On a computer the script below opens Meta's popup instead.
+               ? `<form method="POST" action="/settings/whatsapp/start" id="connect-form">
+                    <button type="submit" name="mode" value="app" id="connect-whatsapp-app" class="full" data-mode="app">Keep my WhatsApp Business app (scan a QR code)</button>
+                    <button type="submit" name="mode" value="api" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>
+                  </form>`
+               : `<button type="button" id="connect-whatsapp-app" class="full" data-mode="app">Keep my WhatsApp Business app (scan a QR code)</button>
+                  <button type="button" id="connect-whatsapp" class="full ghost connect-alt" data-mode="api">Use a number that's not on WhatsApp</button>`}
              <p class="hint" id="connect-status" role="status" aria-live="polite" hidden></p>
              <p class="hint" id="connect-recover" hidden>
-               <a href="#assist">Let us set it up for you</a> · <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
+               <a href="#assist">Let us set it up for you</a> ·
+               ${signup.sameTab ? `<a href="/settings/whatsapp" id="connect-same-tab">Try again in this tab</a> ·` : ""}
+               <a href="/settings/whatsapp">Try again</a> · <a href="#advanced">Advanced setup</a>
              </p>
              <p class="hint">Securely connect your WhatsApp Business account through Meta.</p>
-             <noscript>
+             ${signup.sameTab ? "" : `<noscript>
                <p class="hint">Connecting through Meta needs JavaScript. Use Advanced setup below instead.</p>
-             </noscript>`
+             </noscript>`}`
           : `<p class="hint" style="margin:0">
                One-click connection isn't switched on for this deployment yet, so there is
                nothing here that could complete a connection. Use Advanced setup below, or
@@ -780,11 +790,16 @@ function qrPollScript() {
 /**
  * The Embedded Signup client.
  *
- * It does three things and deliberately nothing else: open Meta's flow,
- * catch the two pieces Meta hands back (the asset ids over postMessage,
- * the exchangeable code in the login callback), and POST both to our
- * server. It does not decide whether the connection worked — the server
- * asks Meta that and answers with a redirect.
+ * On a computer it does three things and deliberately nothing else: open
+ * Meta's popup, catch the two pieces Meta hands back (the asset ids over
+ * postMessage, the exchangeable code in the login callback), and POST
+ * both to our server. It does not decide whether the connection worked —
+ * the server asks Meta that and answers with a redirect.
+ *
+ * On a phone it does even less: it lets the buttons' form submit, so the
+ * tab itself goes to Meta and Meta brings it back to our callback with
+ * the code (see lib/embeddedSignupRedirect.mjs for why the popup cannot
+ * work there).
  *
  * Rules this code exists to keep:
  *
@@ -792,7 +807,9 @@ function qrPollScript() {
  *    sessionStorage, no cookie of its own. The code lives in a closure
  *    variable for the few seconds between callback and POST, and Meta
  *    expires it in well under a minute anyway.
- * 2. Nothing sensitive goes in a URL. The code is a POST body.
+ * 2. Nothing sensitive goes in a URL we build. The popup's code is a POST
+ *    body; the same-tab flow's code is in Meta's redirect to us, and the
+ *    server spends it at once and replaces that address.
  * 3. Messages are only trusted from Meta's own origins, and only in the
  *    shape Embedded Signup documents.
  * 4. Every failure path leaves the customer with a sentence and two ways
@@ -807,7 +824,13 @@ function embeddedSignupScript(signup) {
   if (!btn) return;
   // Both connect buttons share one flow. "app" keeps the number on the
   // owner's WhatsApp Business app (Meta coexistence); "api" moves it.
-  var buttons = [btn, document.getElementById("connect-whatsapp-app")].filter(Boolean);
+  var appBtn = document.getElementById("connect-whatsapp-app");
+  var buttons = [btn, appBtn].filter(Boolean);
+  // Present when this deployment can run the same-tab flow: the buttons
+  // then sit in a form that POSTs to /settings/whatsapp/start.
+  var form = document.getElementById("connect-form");
+  var sameTabLink = document.getElementById("connect-same-tab");
+  var forceSameTab = false;
   var mode = "api";
   var sawAppOnboarding = false;
   function setDisabled(v) { buttons.forEach(function (b) { b.disabled = v; }); }
@@ -896,6 +919,9 @@ function embeddedSignupScript(signup) {
       .then(function (res) {
         var body = res.body || {};
         if (res.ok && body.redirect) { location.assign(body.redirect); return; }
+        // The popup brought nothing back. Stay on this page, where the
+        // owner can carry on in this same tab instead.
+        if (!code && form) { fail(body.error || "WhatsApp connection wasn't completed. You can try again or use Advanced setup."); return; }
         if (body.redirect) { location.assign(body.redirect); return; }
         fail(body.error || "WhatsApp connection wasn't completed. You can try again or use Advanced setup.");
       })
@@ -935,10 +961,7 @@ function embeddedSignupScript(signup) {
     assets = null;
     mode = which === "app" ? "app" : "api";
     sawAppOnboarding = false;
-    // On a phone the Meta flow opens as a separate tab and ends on a page
-    // that says "Please close this tab". Say so up front, or the owner is
-    // left on that page wondering whether anything happened.
-    say("Opening Meta\\u2026 On a phone, Facebook opens in a new tab: finish there, close it when it says so, and come back to this tab.");
+    say("Opening Meta\\u2026 Finish the steps in the Facebook window, then come back to this page.");
     window.FB.login(onLogin, {
       config_id: CFG.configId,
       response_type: "code",
@@ -946,8 +969,62 @@ function embeddedSignupScript(signup) {
       extras: { setup: {}, featureType: mode === "app" ? "whatsapp_business_app_onboarding" : "", sessionInfoVersion: "3" }
     });
   }
+
+  // Phones never get the popup. There it opens as a new tab that loses
+  // its link back to this page part way through Meta's flow, after which
+  // the SDK reports "closed" with no code and nothing Meta sends can reach
+  // us. Tablets and in-app browsers (Facebook, Instagram, WhatsApp) behave
+  // the same. They use the same-tab flow: the form posts, this tab goes to
+  // Meta, and Meta sends it back to /settings/whatsapp/callback.
+  function isPhone() {
+    var nav = window.navigator || {};
+    if (nav.userAgentData && nav.userAgentData.mobile) return true;
+    var ua = String(nav.userAgent || "");
+    if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Opera Mini|IEMobile|FBAN|FBAV|FB_IAB|Instagram|WhatsApp/i.test(ua)) return true;
+    // iPadOS asks for desktop sites and reports itself as a Mac.
+    if (/Macintosh/.test(ua) && Number(nav.maxTouchPoints) > 1) return true;
+    // A phone on "Desktop site" claims to be a Linux PC, but its only
+    // pointer is still a finger. Touchscreen laptops have a mouse or
+    // trackpad as their main pointer, so they keep the popup.
+    try {
+      return Boolean(window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
+    } catch (e) {
+      return false;
+    }
+  }
+
   buttons.forEach(function (b) {
-    b.addEventListener("click", function () { start(b.getAttribute("data-mode")); });
+    b.addEventListener("click", function (ev) {
+      if (busy) { if (ev && ev.preventDefault) ev.preventDefault(); return; }
+      if (form && (forceSameTab || isPhone() || !window.FB)) {
+        // Let the form submit. Disabled only after the browser has read
+        // which button was pressed.
+        busy = true;
+        mode = b.getAttribute("data-mode") === "app" ? "app" : "api";
+        say("Opening Facebook\\u2026 Finish the steps there and you will come back to this page by yourself.");
+        setTimeout(function () { setDisabled(true); }, 0);
+        return;
+      }
+      if (ev && ev.preventDefault) ev.preventDefault();
+      start(b.getAttribute("data-mode"));
+    });
+  });
+
+  // "Try again in this tab", offered when the popup brought nothing back.
+  if (sameTabLink && form) {
+    sameTabLink.addEventListener("click", function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      forceSameTab = true;
+      busy = false;
+      setDisabled(false);
+      (mode === "app" && appBtn ? appBtn : btn).click();
+    });
+  }
+
+  // Back from Meta's page via the Back button: the page may come back from
+  // the browser's cache with the buttons still disabled.
+  window.addEventListener("pageshow", function (ev) {
+    if (ev && ev.persisted) { busy = false; setDisabled(false); }
   });
 
   window.fbAsyncInit = function () {

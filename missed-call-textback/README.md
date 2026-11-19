@@ -145,6 +145,51 @@ Requires `META_APP_ID` and `META_EMBEDDED_SIGNUP_CONFIG_ID`. Without them
 the page says one-click connection isn't available and offers Advanced
 setup; it never renders a button that cannot complete.
 
+### On a phone: the same tab, not a popup
+
+On a phone Meta's "popup" is a new tab, and that tab loses its link back
+to our page part way through Meta's flow. The SDK then reports the popup
+closed with no code, and nothing Meta posts afterwards (the code, the
+`WA_EMBEDDED_SIGNUP` message) can reach the page. The owner ends on
+"Please close this tab", Meta has linked their number, and MissedCall was
+never told. Every phone attempt on 19 Nov 2026 ended this way. So on
+phones, tablets and in-app browsers the two buttons are a plain form:
+
+```
+Connect button  ──►  POST /settings/whatsapp/start    (signed in; state saved + state cookie)
+                         ▼  302
+   Meta's OAuth dialog in the SAME tab   (same config_id and extras as the popup)
+                         ▼  Meta redirects back
+   GET /settings/whatsapp/callback?code=…&state=…
+       state: matches this browser's cookie, unused, under 30 minutes old
+       membership and role checked again, then the same exchange,
+       number discovery, setup and Meta verification as the popup
+                         ▼
+   a small page that location.replace()s to /settings/whatsapp?v=ok
+```
+
+- **Meta app setting (required):** add
+  `https://<your domain>/settings/whatsapp/callback` under **Facebook Login
+  for Business → Settings → Valid OAuth Redirect URIs**, and make sure the
+  domain is listed in **App settings → Basic → App domains**. Without it
+  Meta shows "URL blocked" on the phone. The address is built from
+  `PUBLIC_BASE_URL` (or `WEBHOOK_BASE_URL`); with neither set the page
+  keeps the popup only.
+- The code arrives in the callback's query string, because that is how
+  OAuth returns one. It is the only place a code is ever in a URL: it is
+  spent at once, useless without the app secret, never logged by us, and
+  the page it lands on replaces its own address and sends no Referer.
+- Meta posts no asset ids to a same-tab login, so the server asks Meta
+  what the token was granted. One free number connects; several are never
+  guessed.
+- The session cookie is SameSite=Strict, so it is not sent on the return
+  from facebook.com. The business comes from the server-side state record
+  that the signed-in start request wrote, never from the request.
+- Computers keep the popup. If it brings nothing back, the page offers
+  **Try again in this tab**, which runs the same-tab flow.
+- Code: `lib/embeddedSignupRedirect.mjs`, `routes/whatsappConnect.mjs`
+  (`handleWhatsappConnectStart`, `handleWhatsappConnectCallback`).
+
 Two things worth knowing:
 
 - **The app secret and verify token are platform-level, not per-business.**
