@@ -29,7 +29,8 @@ export default async function handler(req, res) {
     if (!result) return res.status(404).json({ error: "not found" });
     return sendResult(res, result);
   } catch (err) {
-    logError("app_handler_error", err, { path: req.url });
+    // The path only, never the query: an OAuth callback carries a code there.
+    logError("app_handler_error", err, { path: String(req.url ?? "").split("?")[0] });
     return res.status(500).json({ error: "internal error" });
   }
 }

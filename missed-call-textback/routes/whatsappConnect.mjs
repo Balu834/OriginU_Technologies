@@ -1,7 +1,9 @@
 /**
  * Finishing an Embedded Signup, and re-testing a finished one.
  *
- *   POST /settings/whatsapp/connect   the browser hands back what Meta gave it
+ *   POST /settings/whatsapp/connect   the browser hands back what Meta gave it (computer: popup)
+ *   POST /settings/whatsapp/start     send this tab to Meta's dialog (phone: same tab)
+ *   GET  /settings/whatsapp/callback  Meta sends that tab back here with the code
  *   POST /settings/whatsapp/test      ask Meta again whether it still works
  *   POST /settings/whatsapp/templates create any of our message templates the WABA lacks
  *   POST /settings/whatsapp/send-test send the missed-call message to a number the owner types
@@ -28,9 +30,14 @@
  * answers JSON with a redirect target and a sentence; the test route
  * answers a redirect carrying a status marker.
  */
-import { currentSession } from "../lib/auth.mjs";
+import { currentSession, parseCookies } from "../lib/auth.mjs";
 import { resolveActor, can } from "../lib/users.mjs";
 import { embeddedSignupConfig, SIGNUP_FAILURES, signupMessage, TEMPLATE_DEFINITIONS } from "../lib/embeddedSignup.mjs";
+import {
+  SIGNUP_STATE_COOKIE, beginSignupRedirect, consumeSignupState, signupDialogUrl, signupRedirectUri,
+  signupStateCookie, clearedSignupStateCookie, signupMode,
+} from "../lib/embeddedSignupRedirect.mjs";
+import { escapeHtml } from "../lib/views.mjs";
 import { expiryFromSeconds } from "../lib/integrations.mjs";
 import { reportMissedCall } from "./missedCall.mjs";
 import { log, logError } from "../lib/logger.mjs";
@@ -129,17 +136,184 @@ export async function handleWhatsappConnect(ctx, deps) {
     redirectUris.push(settingsUrl, `${settingsUrl}/`, `${base}/`);
   }
 
-  const exchanged = await deps.embeddedSignup.exchangeCode(code, { redirectUris: [...new Set(redirectUris)] });
+  const done = await completeSignup(deps, actor, {
+    via: "popup",
+    code,
+    exchange: { redirectUris: [...new Set(redirectUris)] },
+    phoneNumberId,
+    wabaId,
+    coexistenceHint: body.coexistence === true,
+  });
+  if (!done.ok) return refuse(done.status, done.reason);
+
+  // Safe metadata only. No token, no code, no WABA id — the settings page
+  // reads the stored record for everything it displays.
+  return {
+    status: 200,
+    body: {
+      ok: done.verified,
+      connected: done.verified,
+      redirect: done.redirect,
+      displayPhoneNumber: done.displayPhoneNumber,
+    },
+  };
+}
+
+/**
+ * POST /settings/whatsapp/start — the same-tab flow phones use.
+ *
+ * A plain form post from either connect button (`mode` = "app" or "api"),
+ * so it also works with no JavaScript at all. The signed-in owner's own
+ * tab is sent to Meta's dialog; Meta sends it back to the callback below.
+ * See lib/embeddedSignupRedirect.mjs for why phones cannot use the popup.
+ */
+export async function handleWhatsappConnectStart(ctx, deps) {
+  const actor = await actorFor(ctx, deps);
+  if (!actor?.businessId) return redirect(SIGN_IN);
+
+  if (!can(actor.role, "manageSettings")) {
+    log("settings_change_denied", { role: actor.role });
+    return redirect("/settings/whatsapp");
+  }
+
+  const signup = embeddedSignupConfig(deps.config ?? {});
+  const redirectUri = signupRedirectUri(deps.config ?? {});
+  if (!signup.available || !deps.embeddedSignup || !redirectUri) {
+    return redirect(`/settings/whatsapp?e=${SIGNUP_FAILURES.NOT_CONFIGURED}`);
+  }
+
+  const mode = signupMode(new URLSearchParams(ctx.rawBody?.toString("utf8") ?? "").get("mode"));
+  const { state } = await beginSignupRedirect(deps.store, {
+    businessId: actor.businessId,
+    userId: actor.user?.id ?? null,
+    mode,
+  });
+  log("embedded_signup_redirect_started", { businessId: actor.businessId, mode });
+
+  return {
+    status: 302,
+    headers: {
+      Location: signupDialogUrl({
+        appId: signup.appId, configId: signup.configId, graphVersion: signup.graphVersion,
+        redirectUri, state, mode,
+      }),
+      "Set-Cookie": signupStateCookie(state),
+      "Cache-Control": "no-store",
+    },
+    body: {},
+  };
+}
+
+/**
+ * GET /settings/whatsapp/callback — Meta sends the owner's tab back here.
+ *
+ * The query carries `state` and either `code` or Meta's `error`. The
+ * session cookie is SameSite=Strict and is not sent on a navigation that
+ * began on facebook.com, so the business comes from the state record that
+ * the signed-in start request wrote, checked against this browser's state
+ * cookie, and the membership and role are checked again here.
+ *
+ * Always answers with a small page that moves on to /settings/whatsapp
+ * (not a 302: the Strict session cookie would be left off that request
+ * too, and the owner would land on the sign-in page). That page replaces
+ * its own address, which holds the code, and sends no Referer.
+ */
+export async function handleWhatsappConnectCallback(ctx, deps) {
+  let target;
+  try {
+    target = await finishSignupRedirect(ctx, deps);
+  } catch (err) {
+    // Never let this throw to the request handler, whose error log would
+    // record the URL, and with it the code.
+    logError("embedded_signup_redirect_error", err, {});
+    target = `/settings/whatsapp?e=${SIGNUP_FAILURES.EXCHANGE_FAILED}`;
+  }
+  return {
+    status: 200,
+    headers: {
+      "Set-Cookie": clearedSignupStateCookie(),
+      "Cache-Control": "no-store",
+      "Referrer-Policy": "no-referrer",
+    },
+    html: continuePage(target),
+  };
+}
+
+/** The settings address to continue to, with one fixed marker. */
+async function finishSignupRedirect(ctx, deps) {
+  const failed = (reason) => `/settings/whatsapp?e=${reason}`;
+  const query = ctx.query ?? new URLSearchParams();
+
+  const state = query.get("state") ?? "";
+  const cookieState = parseCookies(ctx.headers?.cookie)[SIGNUP_STATE_COOKIE] ?? "";
+  // Spent only when this browser holds the matching cookie, so a stray or
+  // forged callback cannot burn a real attempt in progress.
+  const record = state && state === cookieState ? await consumeSignupState(deps.store, state) : null;
+  if (!record) {
+    log("embedded_signup_redirect_failed", { reason: "state", hasState: Boolean(state), hasCookie: Boolean(cookieState) });
+    return failed(SIGNUP_FAILURES.EXPIRED);
+  }
+
+  // The start request was signed in and allowed; this re-checks that it
+  // still is, from the stored membership, never from the request.
+  const actor = await resolveActor({ businessId: record.businessId, userId: record.userId }, deps.accounts);
+  if (!actor?.businessId || actor.businessId !== record.businessId || !can(actor.role, "manageSettings")) {
+    log("embedded_signup_redirect_failed", { reason: "membership", businessId: record.businessId });
+    return failed(SIGNUP_FAILURES.EXPIRED);
+  }
+
+  const signup = embeddedSignupConfig(deps.config ?? {});
+  const redirectUri = signupRedirectUri(deps.config ?? {});
+  if (!signup.available || !deps.embeddedSignup || !redirectUri) return failed(SIGNUP_FAILURES.NOT_CONFIGURED);
+
+  const code = String(query.get("code") ?? "").trim();
+  if (!code) {
+    // Meta's own refusal (the owner pressed Cancel, or Meta stopped the
+    // flow). Its reason words are logged; its description is not shown.
+    const metaError = String(query.get("error_reason") || query.get("error") || "").replace(/[^a-z0-9_]/gi, "").slice(0, 40);
+    log("embedded_signup_incomplete", {
+      businessId: actor.businessId,
+      via: "redirect",
+      mode: record.mode,
+      hasCode: false,
+      metaError: metaError || null,
+    });
+    return failed(metaError ? SIGNUP_FAILURES.CANCELLED : SIGNUP_FAILURES.MISSING_CODE);
+  }
+
+  const done = await completeSignup(deps, actor, {
+    via: "redirect",
+    code,
+    exchange: { redirectUri },
+    coexistenceHint: record.mode === "app",
+  });
+  return done.ok ? done.redirect : failed(done.reason);
+}
+
+/**
+ * Everything after Meta has handed back a code, for both ways of getting
+ * one: exchange it, find the number if the browser could not say, set the
+ * number up, store it encrypted against THIS business, and ask Meta
+ * whether it works. Returns `{ ok: false, status, reason }` for a refusal
+ * before anything is stored, else `{ ok: true, verified, redirect, ... }`.
+ */
+async function completeSignup(deps, actor, {
+  via, code, exchange, phoneNumberId = "", wabaId = "", coexistenceHint = false,
+}) {
+  const stop = (status, reason) => ({ ok: false, status, reason });
+
+  const exchanged = await deps.embeddedSignup.exchangeCode(code, exchange);
   if (!exchanged.ok) {
     log("embedded_signup_failed", {
       businessId: actor.businessId,
+      via,
       reason: exchanged.reason,
       idsFromBrowser: Boolean(phoneNumberId && wabaId),
       metaCode: exchanged.meta?.code ?? null,
       metaSubcode: exchanged.meta?.subcode ?? null,
       metaMessage: exchanged.meta?.message ?? null,
     });
-    return refuse(exchanged.reason === SIGNUP_FAILURES.NETWORK_ERROR ? 502 : 400, exchanged.reason);
+    return stop(exchanged.reason === SIGNUP_FAILURES.NETWORK_ERROR ? 502 : 400, exchanged.reason);
   }
   const accessToken = exchanged.accessToken;
 
@@ -170,20 +344,20 @@ export async function handleWhatsappConnect(ctx, deps) {
       phoneNumberId = free[0].phoneNumberId;
       wabaId = free[0].wabaId;
     } else if (free.length === 0 && takenElsewhere.length > 0) {
-      return refuse(409, SIGNUP_FAILURES.NUMBER_TAKEN);
+      return stop(409, SIGNUP_FAILURES.NUMBER_TAKEN);
     } else {
-      return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
+      return stop(400, SIGNUP_FAILURES.MISSING_ASSETS);
     }
   }
-  if (!phoneNumberId || !wabaId) return refuse(400, SIGNUP_FAILURES.MISSING_ASSETS);
+  if (!phoneNumberId || !wabaId) return stop(400, SIGNUP_FAILURES.MISSING_ASSETS);
 
   // A number that stays on the owner's WhatsApp Business app ("coexistence")
   // is already registered, and Meta says not to register it again. Meta's
-  // own answer decides; the browser's report is only the fallback.
+  // own answer decides; which button the owner pressed is only the fallback.
   const onApp = deps.embeddedSignup.isOnBusinessApp
     ? await deps.embeddedSignup.isOnBusinessApp(phoneNumberId, accessToken)
     : null;
-  const coexistence = onApp ?? body.coexistence === true;
+  const coexistence = onApp ?? coexistenceHint === true;
 
   // Both best-effort, both reported. Neither can make a connection
   // CONNECTED and neither failing is allowed to discard a token the
@@ -224,10 +398,10 @@ export async function handleWhatsappConnect(ctx, deps) {
       tokenExpiresAt: expiryFromSeconds(exchanged.expiresIn),
       coexistence,
     });
-    log("integration_registered", { businessId: actor.businessId, via: "embedded_signup" });
+    log("integration_registered", { businessId: actor.businessId, via: "embedded_signup", flow: via });
   } catch (err) {
-    logError("integration_register_failed", err, { businessId: actor.businessId, via: "embedded_signup" });
-    return refuse(409, SIGNUP_FAILURES.NUMBER_TAKEN);
+    logError("integration_register_failed", err, { businessId: actor.businessId, via: "embedded_signup", flow: via });
+    return stop(409, SIGNUP_FAILURES.NUMBER_TAKEN);
   }
 
   // The customer's own WABA needs the missed-call template before a single
@@ -267,6 +441,7 @@ export async function handleWhatsappConnect(ctx, deps) {
 
   log("embedded_signup_completed", {
     businessId: actor.businessId,
+    via,
     verified: result.ok,
     registered: registered.ok,
     registerSkipped: Boolean(registered.skipped),
@@ -276,17 +451,33 @@ export async function handleWhatsappConnect(ctx, deps) {
     template: template.skipped ? "skipped" : template.ok ? (template.existing ? "existing" : "submitted") : "failed",
   });
 
-  // Safe metadata only. No token, no code, no WABA id — the settings page
-  // reads the stored record for everything it displays.
   return {
-    status: 200,
-    body: {
-      ok: result.ok,
-      connected: result.ok,
-      redirect: `/settings/whatsapp?v=${encodeURIComponent(result.ok ? "ok" : result.reason)}`,
-      displayPhoneNumber: described.displayPhoneNumber,
-    },
+    ok: true,
+    verified: result.ok,
+    redirect: `/settings/whatsapp?v=${encodeURIComponent(result.ok ? "ok" : result.reason)}`,
+    displayPhoneNumber: described.displayPhoneNumber,
   };
+}
+
+/**
+ * The page the callback answers with: it moves straight on to `location`
+ * (a fixed /settings/whatsapp address with one marker) and replaces the
+ * callback's own address in history, because that address holds the code.
+ */
+function continuePage(location) {
+  const href = escapeHtml(location);
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="refresh" content="0;url=${href}">
+<title>Connecting WhatsApp</title>
+</head><body style="font-family:system-ui,sans-serif;padding:40px;text-align:center">
+<p>Finishing your WhatsApp connection… <a href="${href}">Continue</a></p>
+<script>location.replace(${JSON.stringify(location).replace(/</g, "\\u003c")});</script>
+</body></html>`;
 }
 
 /**

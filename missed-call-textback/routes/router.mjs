@@ -28,7 +28,8 @@ import { handleBillingStatus } from "./billingStatus.mjs";
 import { handleOverview } from "./overview.mjs";
 import { handleBusinessSettingsGet, handleBusinessSettingsPost } from "./businessSettings.mjs";
 import {
-  handleWhatsappConnect, handleWhatsappTest, handleWhatsappTemplates, handleWhatsappSendTest,
+  handleWhatsappConnect, handleWhatsappConnectStart, handleWhatsappConnectCallback,
+  handleWhatsappTest, handleWhatsappTemplates, handleWhatsappSendTest,
 } from "./whatsappConnect.mjs";
 import { handlePrivacy, handleTerms, handleDataDeletion } from "./legal.mjs";
 import { handlePhoneSetupGet, handlePhoneKeyPost } from "./phoneSetup.mjs";
@@ -41,7 +42,7 @@ import { handleWhatsappAssistPost } from "./whatsappAssist.mjs";
 export const NON_JSON_POSTS = new Set([
   "/webhook", "/login", "/logout", "/leads/status", "/lead/priority",
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
-  "/settings/business", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/whatsapp/assist", "/settings/phone/key",
+  "/settings/business", "/settings/whatsapp/start", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/whatsapp/assist", "/settings/phone/key",
   "/settings/whatsapp/qr/start", "/settings/whatsapp/qr/logout",
   "/forgot-password", "/reset-password", "/ivr/missed-call",
 ]);
@@ -77,6 +78,8 @@ const ROUTES = [
   ["GET", "/settings/whatsapp", handleWhatsappSettingsGet],
   ["POST", "/settings/whatsapp", handleWhatsappSettingsPost],
   ["POST", "/settings/whatsapp/connect", handleWhatsappConnect],
+  ["POST", "/settings/whatsapp/start", handleWhatsappConnectStart],
+  ["GET", "/settings/whatsapp/callback", handleWhatsappConnectCallback],
   ["POST", "/settings/whatsapp/test", handleWhatsappTest],
   ["POST", "/settings/whatsapp/templates", handleWhatsappTemplates],
   ["POST", "/settings/whatsapp/send-test", handleWhatsappSendTest],
