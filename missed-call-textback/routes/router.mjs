@@ -44,7 +44,7 @@ export const NON_JSON_POSTS = new Set([
   "/lead/retry-notify", "/lead/delete", "/signup", "/onboarding", "/settings/whatsapp", "/settings/team",
   "/settings/business", "/settings/whatsapp/start", "/settings/whatsapp/test", "/settings/whatsapp/templates", "/settings/whatsapp/send-test", "/settings/whatsapp/assist", "/settings/phone/key",
   "/settings/whatsapp/qr/start", "/settings/whatsapp/qr/logout",
-  "/forgot-password", "/reset-password", "/ivr/missed-call",
+  "/forgot-password", "/reset-password", "/missed-call", "/ivr/missed-call",
 ]);
 
 const ROUTES = [

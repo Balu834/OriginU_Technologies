@@ -22,10 +22,16 @@ function extractBearerToken(authHeader) {
 /**
  * POST /missed-call — called by the phone automation (MacroDroid/Tasker).
  * Auth: `Authorization: Bearer <MISSED_CALL_API_KEY>`.
+ *
+ * The body is meant to be `{"callerNumber":"[call_number]"}`, but it is
+ * typed by a business owner on a phone keyboard, which swaps in curly
+ * quotes, adds spaces after words and changes capitals. A body that is not
+ * JSON is therefore read the way the IVR route reads one (form fields, the
+ * query string, smart quotes fixed) rather than refused unread.
  */
 export async function handleMissedCall(ctx, deps) {
   const { config, businesses } = deps;
-  const token = extractBearerToken(ctx.headers.authorization);
+  const token = extractBearerToken(ctx.headers?.authorization);
 
   // The API key identifies which business the automation belongs to, so
   // authentication and tenant resolution are the same step — a key can
@@ -42,14 +48,17 @@ export async function handleMissedCall(ctx, deps) {
   // MacroDroid's [call_number] is the number as the phone shows it:
   // "9876543210" or "09876543210", rarely "+91…". Read it the same way the
   // IVR route does, so a phone that never shows a country code still works.
-  const input = ctx.json ?? {};
-  const callerNumber = toE164(input.callerNumber);
+  const input = ctx.json && typeof ctx.json === "object" && !Array.isArray(ctx.json) ? ctx.json : null;
+  const fields = input
+    ? new Map(Object.entries(input).filter(([, v]) => v !== null && typeof v !== "object").map(([k, v]) => [k, String(v)]))
+    : requestFields(ctx);
+  const callerNumber = findCallerNumber(fields);
   if (!callerNumber) {
-    log("missed_call_bad_number", { route: "/missed-call", callerNumber: maskPhone(String(input.callerNumber ?? "")) });
+    log("missed_call_bad_number", { route: "/missed-call", ...describeFields(fields, { bodyWasJson: Boolean(input) }) });
     return { status: 400, body: { error: "callerNumber must be a phone number, e.g. +919876543210 or 9876543210" } };
   }
 
-  return reportMissedCall(business, { ...input, callerNumber }, deps);
+  return reportMissedCall(business, { ...(input ?? {}), callerNumber }, deps);
 }
 
 /** Where IVR providers put the caller's number, in the order they are tried. */
@@ -57,6 +66,105 @@ const CALLER_FIELDS = [
   "callerNumber", "CallFrom", "From", "caller_id", "callerid", "caller_number",
   "customer_number", "caller", "msisdn", "mobile",
 ];
+
+/**
+ * A field name as compared: no case, spaces, underscores or dashes. A name
+ * typed on a phone ("callerNumber " with the keyboard's trailing space,
+ * "Caller number", "caller_number") is then the name that was meant.
+ */
+const fold = (name) => String(name ?? "").toLowerCase().replace(/[\s_-]/g, "");
+const CALLER_KEYS = [...new Set(CALLER_FIELDS.map(fold))];
+
+/**
+ * Fields that hold a number which is NOT the caller's: the business's own
+ * line, the key, and the answer status. Never picked by the fallback below.
+ */
+const NOT_CALLER_KEYS = new Set(
+  ["key", "To", "CallTo", "Called", "called_number", "DialWhomNumber", "did", "virtual_number",
+    "DialCallStatus", "dial_call_status", "call_status"].map(fold)
+);
+
+/** A value that is a phone number and nothing else: digits, +, spaces, dashes, brackets. */
+const PHONE_SHAPED = /^\+?[\d\s().-]{8,20}$/;
+
+/**
+ * The E.164 number in a value that is unmistakably a phone number, for the
+ * unnamed-field fallback only: written with a leading "+", or an Indian
+ * mobile (10 digits from 6-9, optionally after 0, 91 or 0091). Stricter than
+ * toE164 on purpose: a Unix timestamp or a date is digits too, and reading
+ * one as a number would send a business's message to a stranger.
+ */
+function unmistakablePhone(value) {
+  const v = String(value ?? "").trim();
+  if (!PHONE_SHAPED.test(v)) return null;
+  if (v.startsWith("+")) return toE164(v);
+  const digits = v.replace(/\D/g, "");
+  const national = digits.length === 14 && digits.startsWith("0091") ? digits.slice(4)
+    : digits.length === 12 && digits.startsWith("91") ? digits.slice(2)
+    : digits.length === 11 && digits.startsWith("0") ? digits.slice(1)
+    : digits;
+  return /^[6-9]\d{9}$/.test(national) ? `+91${national}` : null;
+}
+
+/**
+ * The caller's number from request fields, or null.
+ *
+ * Named fields first, in CALLER_FIELDS order, compared by folded name. If
+ * none is there, the one value that is shaped like a phone number, but only
+ * when there is exactly one: two candidates (an IVR's From and To) are a
+ * guess, and a guess sends a business's message to the wrong person.
+ */
+export function findCallerNumber(fields) {
+  const byKey = new Map();
+  for (const [name, value] of fields ?? []) {
+    const v = String(value ?? "").trim();
+    if (v && !byKey.has(fold(name))) byKey.set(fold(name), v);
+  }
+  for (const key of CALLER_KEYS) {
+    const e164 = toE164(byKey.get(key));
+    if (e164) return e164;
+  }
+  const candidates = new Set();
+  for (const [key, value] of byKey) {
+    if (NOT_CALLER_KEYS.has(key)) continue;
+    const e164 = unmistakablePhone(value);
+    if (e164) candidates.add(e164);
+  }
+  return candidates.size === 1 ? [...candidates][0] : null;
+}
+
+/** A field's value by folded name, so "Key" and "key " find the key. */
+function fieldValue(fields, name) {
+  const want = fold(name);
+  for (const [k, v] of fields) if (fold(k) === want && String(v ?? "").trim()) return String(v).trim();
+  return undefined;
+}
+
+/**
+ * What arrived, for the log of a request that had no readable caller: field
+ * NAMES only (quoted, so a stray space shows), and how many values looked
+ * like a phone number. Never a value: one of them is the key.
+ */
+function describeFields(fields, extra = {}) {
+  const names = [...(fields?.keys() ?? [])];
+  let phoneShaped = 0;
+  for (const [k, v] of fields ?? []) if (!NOT_CALLER_KEYS.has(fold(k)) && unmistakablePhone(v)) phoneShaped += 1;
+  // The value of the caller field, if one was named, masked like every
+  // number this codebase logs: shows a malformed number without the number.
+  const named = CALLER_KEYS.map((key) => [...(fields ?? [])].find(([k, v]) => fold(k) === key && String(v ?? "").trim())?.[1])
+    .find(Boolean);
+  return {
+    callerNumber: maskPhone(String(named ?? "")),
+    fieldNames: names.slice(0, 12).map((n) => JSON.stringify(String(n).slice(0, 40))),
+    phoneShapedValues: phoneShaped,
+    ...extra,
+  };
+}
+
+/** Curly quotes a phone keyboard substitutes for the straight ones JSON needs. */
+function straightenQuotes(text) {
+  return text.replace(/[“”„‟″«»]/g, '"').replace(/[‘’‚‛′]/g, "'");
+}
 
 /**
  * Fields that say whether a person picked up after the IVR. Only these are
@@ -67,25 +175,33 @@ const ANSWER_STATUS_FIELDS = ["DialCallStatus", "dial_call_status", "call_status
 const ANSWERED = new Set(["completed", "answered", "connected", "answer"]);
 
 /**
- * Reads an IVR request's fields from the query string and the body. Providers
+ * Reads a request's fields from the query string and the body. IVR providers
  * send GET query strings (Exotel Passthru), form posts or JSON, and none of
- * them can be told to use our exact shape, so all three are accepted.
+ * them can be told to use our exact shape, so all three are accepted. A JSON
+ * body typed on a phone gets its curly quotes straightened first. An empty
+ * value never replaces a filled one of the same name.
  */
-function ivrFields(ctx) {
+function requestFields(ctx) {
   const fields = new Map();
-  for (const [k, v] of ctx.query ?? []) fields.set(k, v);
+  const put = (k, v) => {
+    const value = String(v ?? "");
+    if (!value.trim() && String(fields.get(k) ?? "").trim()) return;
+    fields.set(k, value);
+  };
+  for (const [k, v] of ctx.query ?? []) put(k, v);
 
   const raw = ctx.rawBody?.length ? ctx.rawBody.toString("utf8") : "";
   if (raw) {
     const type = String(ctx.headers?.["content-type"] ?? "");
+    const text = straightenQuotes(raw);
     let parsed = null;
-    if (type.includes("json") || raw.trimStart().startsWith("{")) {
-      try { parsed = JSON.parse(raw); } catch { parsed = null; }
+    if (type.includes("json") || text.trimStart().startsWith("{")) {
+      try { parsed = JSON.parse(text); } catch { parsed = null; }
     }
-    if (parsed && typeof parsed === "object") {
-      for (const [k, v] of Object.entries(parsed)) if (v !== null && typeof v !== "object") fields.set(k, String(v));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [k, v] of Object.entries(parsed)) if (v !== null && typeof v !== "object") put(k, String(v));
     } else {
-      for (const [k, v] of new URLSearchParams(raw)) fields.set(k, v);
+      for (const [k, v] of new URLSearchParams(text)) put(k, v);
     }
   }
   return fields;
@@ -102,8 +218,8 @@ function ivrFields(ctx) {
  */
 export async function handleIvrMissedCall(ctx, deps) {
   const { config, businesses } = deps;
-  const fields = ivrFields(ctx);
-  const token = extractBearerToken(ctx.headers?.authorization) ?? fields.get("key") ?? null;
+  const fields = requestFields(ctx);
+  const token = extractBearerToken(ctx.headers?.authorization) ?? fieldValue(fields, "key") ?? null;
 
   const business = businesses ? businesses.byApiKey(token, timingSafeEqualStr) : null;
   const authorised = businesses ? Boolean(business) : token && timingSafeEqualStr(token, config.MISSED_CALL_API_KEY);
@@ -114,16 +230,15 @@ export async function handleIvrMissedCall(ctx, deps) {
 
   // A provider that calls on every call, not just missed ones, tells us
   // when someone answered. Those callers were spoken to; no message.
-  const answerStatus = ANSWER_STATUS_FIELDS.map((f) => fields.get(f)).find(Boolean);
+  const answerStatus = ANSWER_STATUS_FIELDS.map((f) => fieldValue(fields, f)).find(Boolean);
   if (answerStatus && ANSWERED.has(answerStatus.trim().toLowerCase())) {
     log("ivr_call_answered_ignored", {});
     return { status: 200, body: { sent: false, reason: "call was answered" } };
   }
 
-  const rawCaller = CALLER_FIELDS.map((f) => fields.get(f)).find(Boolean);
-  const callerNumber = toE164(rawCaller);
+  const callerNumber = findCallerNumber(fields);
   if (!callerNumber) {
-    log("missed_call_bad_number", { route: "/ivr/missed-call", callerNumber: maskPhone(String(rawCaller ?? "")) });
+    log("missed_call_bad_number", { route: "/ivr/missed-call", ...describeFields(fields) });
     return {
       status: 400,
       body: { error: `no caller number found; send it as one of: ${CALLER_FIELDS.join(", ")}` },
